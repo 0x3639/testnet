@@ -1,12 +1,13 @@
 import cookieParser from "cookie-parser";
 import express from "express";
+import { createECDH } from "node:crypto";
 import path from "node:path";
 import { z } from "zod";
 import { clearSessionCookie, login, logout, requireAuth, sessionTokenFromRequest, setSessionCookie, type AuthedRequest } from "./auth.js";
 import { createAccount, resetAccountPassword } from "./accounts.js";
 import { decryptText, encryptText, randomId, sha256 } from "./crypto.js";
 import { buildGenesis, buildNodeConfig, readiness, toPublicPillar } from "./genesis.js";
-import { buildPillarPackage, buildSporkPackage } from "./packages.js";
+import { buildPillarPackage, buildSeedNodePackage, buildSporkPackage } from "./packages.js";
 import { probeSeedNode, validateSeedNodeIp } from "./seeders.js";
 import { readState, updateState } from "./storage.js";
 import { createWallet, toStoredWallet } from "./wallets.js";
@@ -19,7 +20,8 @@ import type {
   PillarRecord,
   PublishedArtifacts,
   PublishedArtifactsInfo,
-  PublicNetworkSettings
+  PublicNetworkSettings,
+  SeedNodeRecord
 } from "../shared/types.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -33,14 +35,25 @@ const loginSchema = z.object({
   password: z.string().min(1)
 });
 
-const pillarSchema = z.object({
-  pillarName: z
-    .string()
-    .trim()
-    .min(3)
-    .max(40)
-    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "Use letters, numbers, dots, underscores, or hyphens")
-});
+const nodeNameSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(40)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "Use letters, numbers, dots, underscores, or hyphens");
+
+const nodeRegistrationSchema = z.discriminatedUnion("nodeType", [
+  z.object({
+    nodeType: z.literal("pillar"),
+    pillarName: nodeNameSchema
+  }),
+  z.object({
+    nodeType: z.literal("seed"),
+    nodeName: nodeNameSchema,
+    publicIp: z.string().trim().refine(validateSeedNodeIp, "Seed node public IP must be an IP address"),
+    p2pPort: z.number().int().min(1).max(65535).default(35995)
+  })
+]);
 
 const usernameSchema = z
   .string()
@@ -67,6 +80,7 @@ const settingsSchema = z.object({
   expectedPillars: z.number().int().min(1).max(100),
   minPillars: z.number().int().min(1).max(100),
   genesisTimestampSec: z.number().int().positive(),
+  releaseApplyAtSec: z.number().int().positive().optional(),
   goZenonRepo: z.string().trim().min(1).max(300),
   goZenonRef: z.string().trim().min(1).max(160),
   goZenonCommit: z.string().trim().max(80).optional(),
@@ -150,15 +164,59 @@ function publicSettings(settings: NetworkSettings): PublicNetworkSettings {
   };
 }
 
+function publicSeedNode(record: SeedNodeRecord) {
+  return {
+    id: record.id,
+    nodeName: record.nodeName,
+    publicIp: record.publicIp,
+    p2pPort: record.p2pPort,
+    publicKey: record.publicKey,
+    enode: record.enode,
+    createdAt: record.createdAt,
+    packageDownloadedAt: record.packageDownloadedAt,
+    nodeStatus: record.nodeStatus
+      ? {
+          latest: record.nodeStatus.latest,
+          historyCount: record.nodeStatus.history.length
+        }
+      : undefined
+  };
+}
+
+function createNetworkKey() {
+  const ecdh = createECDH("secp256k1");
+  ecdh.generateKeys();
+  const privateKey = ecdh.getPrivateKey("hex").padStart(64, "0");
+  const publicKey = ecdh.getPublicKey("hex", "uncompressed").slice(2);
+  return { privateKey, publicKey };
+}
+
+type BootstrapNode =
+  | {
+      nodeType: "pillar";
+      pillar: PillarRecord;
+    }
+  | {
+      nodeType: "seed";
+      seedNode: SeedNodeRecord;
+    };
+
 function managedUsers(state: AppState): ManagedUser[] {
   return state.users
-    .map((user) => ({
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      createdAt: user.createdAt,
-      pillarName: state.pillars.find((pillar) => pillar.userId === user.id)?.pillarName
-    }))
+    .map((user) => {
+      const pillar = state.pillars.find((candidate) => candidate.userId === user.id);
+      const seedNode = state.seedNodes.find((candidate) => candidate.userId === user.id);
+      const nodeType: ManagedUser["nodeType"] = pillar ? "pillar" : seedNode ? "seed" : undefined;
+      return {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        createdAt: user.createdAt,
+        pillarName: pillar?.pillarName,
+        nodeName: pillar?.pillarName ?? seedNode?.nodeName,
+        nodeType
+      };
+    })
     .sort((a, b) => a.username.localeCompare(b.username));
 }
 
@@ -171,7 +229,7 @@ async function ensureSporkWallet(): Promise<void> {
   });
 }
 
-function createStatusTokenFields(): Pick<PillarRecord, "statusTokenHash" | "statusTokenCipher"> {
+function createStatusTokenFields(): { statusTokenHash: string; statusTokenCipher: string } {
   const token = randomId(32);
   return {
     statusTokenHash: sha256(token),
@@ -179,15 +237,18 @@ function createStatusTokenFields(): Pick<PillarRecord, "statusTokenHash" | "stat
   };
 }
 
-function ensureStatusToken(pillar: PillarRecord): void {
-  if (pillar.statusTokenHash && pillar.statusTokenCipher) return;
-  Object.assign(pillar, createStatusTokenFields());
+function ensureStatusToken(record: { statusTokenHash?: string; statusTokenCipher?: string }): void {
+  if (record.statusTokenHash && record.statusTokenCipher) return;
+  Object.assign(record, createStatusTokenFields());
 }
 
 async function ensurePillarStatusTokens(): Promise<void> {
   await updateState((state) => {
     for (const pillar of state.pillars) {
       ensureStatusToken(pillar);
+    }
+    for (const seedNode of state.seedNodes) {
+      ensureStatusToken(seedNode);
     }
   });
 }
@@ -198,8 +259,14 @@ async function createPillar(userId: string, pillarName: string) {
     if (state.pillars.some((pillar) => pillar.userId === userId)) {
       throw new Error("This account already has a pillar registration");
     }
+    if (state.seedNodes.some((seedNode) => seedNode.userId === userId)) {
+      throw new Error("This account already has a seed node registration");
+    }
     if (state.pillars.some((pillar) => pillar.pillarName.toLowerCase() === pillarName.toLowerCase())) {
       throw new Error("Pillar name is already registered");
+    }
+    if (state.seedNodes.some((seedNode) => seedNode.nodeName.toLowerCase() === pillarName.toLowerCase())) {
+      throw new Error("Node name is already registered");
     }
 
     const record = {
@@ -215,6 +282,42 @@ async function createPillar(userId: string, pillarName: string) {
     };
     state.pillars.push(record);
     state.finalizedGenesis = undefined;
+    return record;
+  });
+}
+
+async function createSeedNode(userId: string, nodeName: string, publicIp: string, p2pPort: number) {
+  const { privateKey, publicKey } = createNetworkKey();
+  const enode = `enode://${publicKey}@${publicIp}:${p2pPort}`;
+
+  return updateState((state) => {
+    if (state.pillars.some((pillar) => pillar.userId === userId)) {
+      throw new Error("This account already has a pillar registration");
+    }
+    if (state.seedNodes.some((seedNode) => seedNode.userId === userId)) {
+      throw new Error("This account already has a seed node registration");
+    }
+    if (state.pillars.some((pillar) => pillar.pillarName.toLowerCase() === nodeName.toLowerCase())) {
+      throw new Error("Node name is already registered");
+    }
+    if (state.seedNodes.some((seedNode) => seedNode.nodeName.toLowerCase() === nodeName.toLowerCase())) {
+      throw new Error("Seed node name is already registered");
+    }
+
+    const record: SeedNodeRecord = {
+      id: randomId(),
+      userId,
+      nodeName,
+      publicIp,
+      p2pPort,
+      publicKey,
+      enode,
+      networkPrivateKeyCipher: encryptText(privateKey),
+      ...createStatusTokenFields(),
+      createdAt: new Date().toISOString()
+    };
+    state.seedNodes.push(record);
+    state.settings.seeders = Array.from(new Set([...state.settings.seeders, enode]));
     return record;
   });
 }
@@ -244,6 +347,7 @@ function publishedInfo(published?: PublishedArtifacts): PublishedArtifactsInfo |
     nodePlanPath: published.nodePlan ? PUBLIC_NODE_PLAN_PATH : undefined,
     chainIdentifier: published.chainIdentifier,
     seeders: published.seeders,
+    genesisStartAt: published.nodePlan?.genesisStartAt,
     release: published.nodePlan
       ? {
           goZenon: published.nodePlan.goZenon,
@@ -283,8 +387,8 @@ function requestOrigin(request: express.Request): string {
   return `${proto}://${host}`;
 }
 
-function statusToken(pillar: PillarRecord): string {
-  return pillar.statusTokenCipher ? decryptText(pillar.statusTokenCipher) : "";
+function statusToken(record: { statusTokenCipher?: string }): string {
+  return record.statusTokenCipher ? decryptText(record.statusTokenCipher) : "";
 }
 
 function producerPassword(pillar: PillarRecord): string {
@@ -307,6 +411,23 @@ function pillarConfigForDeployment(settings: NetworkSettings, pillar: PillarReco
   });
 }
 
+function seedNodeConfigForDeployment(settings: NetworkSettings, seedNode: SeedNodeRecord): unknown {
+  const config = buildNodeConfig(settings, undefined, undefined, {
+    dataPath: "/root/.znn",
+    walletPath: "/root/.znn/wallet",
+    genesisFile: "/root/.znn/genesis.json"
+  });
+  return {
+    ...config,
+    Name: seedNode.nodeName,
+    Producer: undefined,
+    Net: {
+      ...config.Net,
+      Seeders: settings.seeders.filter((seeder) => seeder !== seedNode.enode)
+    }
+  };
+}
+
 function releaseTarget(settings: NetworkSettings | NetworkSettingsSnapshot) {
   return {
     goZenon: {
@@ -327,42 +448,64 @@ function buildPublishedNodePlan(settings: NetworkSettingsSnapshot, publishedAt: 
     eventId: publishedAt,
     publishedAt,
     finalizedAt,
+    genesisStartAt: new Date(settings.genesisTimestampSec * 1000).toISOString(),
     actions: {
-      wipeData: settings.wipeDataOnPublish
+      wipeData: settings.wipeDataOnPublish,
+      applyAt: settings.releaseApplyAtSec ? new Date(settings.releaseApplyAtSec * 1000).toISOString() : undefined
     },
     ...releaseTarget(settings)
   };
 }
 
-function bootstrapManifest(request: express.Request, published: PublishedArtifacts, pillar: PillarRecord) {
+function bootstrapManifest(request: express.Request, published: PublishedArtifacts, node: BootstrapNode) {
   const origin = requestOrigin(request);
   const nodePlan = published.nodePlan;
   if (!nodePlan) throw new Error("node plan has not been published");
-  return {
+  const base = {
     schemaVersion: nodePlan.schemaVersion,
     eventId: nodePlan.eventId,
     publishedAt: published.publishedAt,
     finalizedAt: nodePlan.finalizedAt,
-    pillarName: pillar.pillarName,
-    pillarAddress: pillar.pillarWallet.address,
-    rewardAddress: pillar.rewardWallet.address,
-    producerAddress: pillar.producerWallet.address,
     genesisUrl: `${origin}${PUBLIC_GENESIS_PATH}`,
-    configUrl: `${origin}/api/bootstrap/pillar-config.json`,
-    producerKeyFileUrl: `${origin}/api/bootstrap/producer.json`,
-    producerPasswordUrl: `${origin}/api/bootstrap/producer-password.txt`,
+    configUrl: `${origin}/api/bootstrap/node-config.json`,
     nodePlanUrl: `${origin}${PUBLIC_NODE_PLAN_PATH}`,
     statusUrl: `${origin}/api/bootstrap/status`,
+    genesisStartAt: nodePlan.genesisStartAt,
     actions: nodePlan.actions,
     goZenon: nodePlan.goZenon,
     deployment: nodePlan.deployment
   };
+
+  if (node.nodeType === "pillar") {
+    return {
+      ...base,
+      nodeType: "pillar",
+      pillarName: node.pillar.pillarName,
+      nodeName: node.pillar.pillarName,
+      pillarAddress: node.pillar.pillarWallet.address,
+      rewardAddress: node.pillar.rewardWallet.address,
+      producerAddress: node.pillar.producerWallet.address,
+      producerKeyFileUrl: `${origin}/api/bootstrap/producer.json`,
+      producerPasswordUrl: `${origin}/api/bootstrap/producer-password.txt`
+    };
+  }
+
+  return {
+    ...base,
+    nodeType: "seed",
+    nodeName: node.seedNode.nodeName,
+    publicIp: node.seedNode.publicIp,
+    p2pPort: node.seedNode.p2pPort,
+    publicKey: node.seedNode.publicKey,
+    enode: node.seedNode.enode,
+    networkPrivateKeyUrl: `${origin}/api/bootstrap/network-private-key`
+  };
 }
 
-async function withBootstrapPillar(
+async function withBootstrapNode(
   request: express.Request,
   response: express.Response,
-  handler: (state: AppState, pillar: PillarRecord) => Promise<void> | void
+  handler: (state: AppState, node: BootstrapNode) => Promise<void> | void
 ): Promise<void> {
   const token = bearerToken(request);
   if (!token) {
@@ -373,12 +516,18 @@ async function withBootstrapPillar(
   const tokenHash = sha256(token);
   const state = await readState();
   const pillar = state.pillars.find((candidate) => candidate.statusTokenHash === tokenHash);
-  if (!pillar) {
-    response.status(401).json({ error: "Invalid bootstrap token" });
+  if (pillar) {
+    await handler(state, { nodeType: "pillar", pillar });
     return;
   }
 
-  await handler(state, pillar);
+  const seedNode = state.seedNodes.find((candidate) => candidate.statusTokenHash === tokenHash);
+  if (seedNode) {
+    await handler(state, { nodeType: "seed", seedNode });
+    return;
+  }
+
+  response.status(401).json({ error: "Invalid bootstrap token" });
 }
 
 function bootstrapInstallScript(origin: string): string {
@@ -390,7 +539,7 @@ if [[ "$EUID" -ne 0 ]]; then
   exit 1
 fi
 
-: "\${ZNN_BOOTSTRAP_TOKEN:?Set ZNN_BOOTSTRAP_TOKEN to the pillar bootstrap token from the testnet builder.}"
+: "\${ZNN_BOOTSTRAP_TOKEN:?Set ZNN_BOOTSTRAP_TOKEN to the node bootstrap token from the testnet builder.}"
 
 BASE_URL="\${ZNN_TESTNET_URL:-${origin}}"
 ZNN_DIR="\${ZNN_DIR:-/root/.znn}"
@@ -461,20 +610,23 @@ wipe_data_dir() {
 
 install_release() {
   local manifest="$1"
-  local event_id go_repo go_ref go_commit deployment_repo deployment_ref genesis_url config_url producer_url producer_password_url wipe_data desired_key installed_key binary_key installed_binary_key binary_missing
+  local event_id node_type go_repo go_ref go_commit deployment_repo deployment_ref genesis_url config_url producer_url producer_password_url network_private_key_url wipe_data apply_at desired_key installed_key binary_key installed_binary_key binary_missing artifacts_ready
 
   event_id="$(printf '%s' "$manifest" | jq -r '.eventId')"
+  node_type="$(printf '%s' "$manifest" | jq -r '.nodeType // "pillar"')"
   go_repo="$(printf '%s' "$manifest" | jq -r '.goZenon.repoUrl')"
   go_ref="$(printf '%s' "$manifest" | jq -r '.goZenon.ref')"
   go_commit="$(printf '%s' "$manifest" | jq -r '.goZenon.commit // empty')"
   deployment_repo="$(printf '%s' "$manifest" | jq -r '.deployment.repoUrl')"
   deployment_ref="$(printf '%s' "$manifest" | jq -r '.deployment.ref')"
   wipe_data="$(printf '%s' "$manifest" | jq -r '.actions.wipeData // false')"
+  apply_at="$(printf '%s' "$manifest" | jq -r '.actions.applyAt // empty')"
   genesis_url="$(printf '%s' "$manifest" | jq -r '.genesisUrl')"
   config_url="$(printf '%s' "$manifest" | jq -r '.configUrl')"
-  producer_url="$(printf '%s' "$manifest" | jq -r '.producerKeyFileUrl')"
-  producer_password_url="$(printf '%s' "$manifest" | jq -r '.producerPasswordUrl')"
-  desired_key="$(printf '%s' "$manifest" | jq -r '[.eventId, .goZenon.repoUrl, .goZenon.ref, (.goZenon.commit // ""), .deployment.repoUrl, .deployment.ref, (.actions.wipeData // false)] | @tsv')"
+  producer_url="$(printf '%s' "$manifest" | jq -r '.producerKeyFileUrl // empty')"
+  producer_password_url="$(printf '%s' "$manifest" | jq -r '.producerPasswordUrl // empty')"
+  network_private_key_url="$(printf '%s' "$manifest" | jq -r '.networkPrivateKeyUrl // empty')"
+  desired_key="$(printf '%s' "$manifest" | jq -r '[.eventId, (.nodeType // "pillar"), .goZenon.repoUrl, .goZenon.ref, (.goZenon.commit // ""), .deployment.repoUrl, .deployment.ref, (.actions.wipeData // false), (.actions.applyAt // "")] | @tsv')"
   binary_key="$(printf '%s' "$manifest" | jq -r '[.goZenon.repoUrl, .goZenon.ref, (.goZenon.commit // ""), .deployment.repoUrl, .deployment.ref] | @tsv')"
   installed_key="$(jq -r '.desiredKey // empty' "$INSTALL_STATE_FILE" 2>/dev/null || true)"
   installed_binary_key="$(jq -r '.binaryKey // empty' "$INSTALL_STATE_FILE" 2>/dev/null || true)"
@@ -483,7 +635,16 @@ install_release() {
     binary_missing=true
   fi
 
-  if [[ "$desired_key" == "$installed_key" && -s "$ZNN_DIR/genesis.json" && -s "$ZNN_DIR/config.json" && -s "$ZNN_DIR/wallet/producer.json" ]]; then
+  artifacts_ready=false
+  if [[ -s "$ZNN_DIR/genesis.json" && -s "$ZNN_DIR/config.json" ]]; then
+    if [[ "$node_type" == "seed" && -s "$ZNN_DIR/network-private-key" ]]; then
+      artifacts_ready=true
+    elif [[ "$node_type" != "seed" && -s "$ZNN_DIR/wallet/producer.json" && -s "$ZNN_DIR/wallet/producer-password.txt" ]]; then
+      artifacts_ready=true
+    fi
+  fi
+
+  if [[ "$desired_key" == "$installed_key" && "$artifacts_ready" == "true" ]]; then
     return 0
   fi
 
@@ -511,11 +672,21 @@ install_release() {
   mkdir -p "$ZNN_DIR/wallet"
   auth_get "$genesis_url" > "$ZNN_DIR/genesis.json"
   auth_get "$config_url" > "$ZNN_DIR/config.json"
-  auth_get "$producer_url" > "$ZNN_DIR/wallet/producer.json"
-  auth_get "$producer_password_url" > "$ZNN_DIR/wallet/producer-password.txt"
+  if [[ -n "$producer_url" ]]; then
+    auth_get "$producer_url" > "$ZNN_DIR/wallet/producer.json"
+  fi
+  if [[ -n "$producer_password_url" ]]; then
+    auth_get "$producer_password_url" > "$ZNN_DIR/wallet/producer-password.txt"
+  fi
+  if [[ -n "$network_private_key_url" ]]; then
+    auth_get "$network_private_key_url" > "$ZNN_DIR/network-private-key"
+  fi
 
   chmod 700 "$ZNN_DIR" "$ZNN_DIR/wallet"
-  chmod 600 "$ZNN_DIR/genesis.json" "$ZNN_DIR/config.json" "$ZNN_DIR/wallet/producer.json" "$ZNN_DIR/wallet/producer-password.txt"
+  chmod 600 "$ZNN_DIR/genesis.json" "$ZNN_DIR/config.json"
+  [[ -f "$ZNN_DIR/wallet/producer.json" ]] && chmod 600 "$ZNN_DIR/wallet/producer.json"
+  [[ -f "$ZNN_DIR/wallet/producer-password.txt" ]] && chmod 600 "$ZNN_DIR/wallet/producer-password.txt"
+  [[ -f "$ZNN_DIR/network-private-key" ]] && chmod 600 "$ZNN_DIR/network-private-key"
 
   if command -v systemctl >/dev/null 2>&1; then
     systemctl restart "$SERVICE_NAME"
@@ -531,15 +702,18 @@ install_release() {
     --arg goCommit "$go_commit" \\
     --arg deploymentRepo "$deployment_repo" \\
     --arg deploymentRef "$deployment_ref" \\
+    --arg nodeType "$node_type" \\
+    --arg applyAt "$apply_at" \\
     --argjson wipeData "$wipe_data" \\
     '{
       desiredKey: $desiredKey,
       binaryKey: $binaryKey,
       eventId: $eventId,
       installedAt: $installedAt,
+      nodeType: $nodeType,
       goZenon: { repoUrl: $goRepo, ref: $goRef, commit: $goCommit },
       deployment: { repoUrl: $deploymentRepo, ref: $deploymentRef },
-      actions: { wipeData: $wipeData }
+      actions: ({ wipeData: $wipeData } + (if $applyAt == "" then {} else { applyAt: $applyAt } end))
     }' > "$INSTALL_STATE_FILE"
 }
 
@@ -635,6 +809,17 @@ if [[ -z "$manifest" ]]; then
   exit 0
 fi
 
+apply_at="$(printf '%s' "$manifest" | jq -r '.actions.applyAt // empty')"
+if [[ -n "$apply_at" ]]; then
+  apply_at_epoch="$(date -u -d "$apply_at" +%s 2>/dev/null || echo 0)"
+  now_epoch="$(date -u +%s)"
+  if [[ "$apply_at_epoch" =~ ^[0-9]+$ ]] && (( apply_at_epoch > now_epoch )); then
+    report_status "$manifest" true
+    echo "Published release applies at $apply_at. Waiting."
+    exit 0
+  fi
+fi
+
 install_release "$manifest"
 report_status "$manifest" false
 AGENT
@@ -685,7 +870,9 @@ async function receiveNodeStatus(request: express.Request, response: express.Res
   try {
     const result = await updateState((state) => {
       const pillar = state.pillars.find((candidate) => candidate.statusTokenHash === tokenHash);
-      if (!pillar) throw new Error("Invalid node status token");
+      const seedNode = state.seedNodes.find((candidate) => candidate.statusTokenHash === tokenHash);
+      const target = pillar ?? seedNode;
+      if (!target) throw new Error("Invalid node status token");
 
       const latest: NodeStatusReport = {
         ...parsed.data,
@@ -693,14 +880,17 @@ async function receiveNodeStatus(request: express.Request, response: express.Res
         remoteAddress: request.ip
       };
 
-      const history = [...(pillar.nodeStatus?.history ?? []), historySample(latest)].slice(-NODE_STATUS_HISTORY_LIMIT);
-      pillar.nodeStatus = {
+      const history = [...(target.nodeStatus?.history ?? []), historySample(latest)].slice(-NODE_STATUS_HISTORY_LIMIT);
+      target.nodeStatus = {
         latest,
         history
       };
 
+      const nodeName = pillar?.pillarName ?? seedNode?.nodeName ?? "unknown";
       return {
-        pillarName: pillar.pillarName,
+        nodeType: pillar ? "pillar" : "seed",
+        nodeName,
+        pillarName: pillar?.pillarName,
         receivedAt: latest.receivedAt
       };
     });
@@ -760,36 +950,74 @@ async function main() {
   });
 
   app.get("/api/bootstrap/manifest", async (request, response) => {
-    await withBootstrapPillar(request, response, (state, pillar) => {
+    await withBootstrapNode(request, response, (state, node) => {
       if (!state.publishedArtifacts?.nodePlan) {
         response.status(404).json({ error: "No published release is available yet" });
         return;
       }
-      response.json(bootstrapManifest(request, state.publishedArtifacts, pillar));
+      response.json(bootstrapManifest(request, state.publishedArtifacts, node));
     });
   });
 
-  app.get("/api/bootstrap/pillar-config.json", async (request, response) => {
-    await withBootstrapPillar(request, response, (state, pillar) => {
+  app.get("/api/bootstrap/node-config.json", async (request, response) => {
+    await withBootstrapNode(request, response, (state, node) => {
       if (!state.publishedArtifacts?.settings) {
         response.status(404).json({ error: "No published release is available yet" });
         return;
       }
-      sendJsonFile(response, pillarConfigForDeployment(state.publishedArtifacts.settings, pillar));
+      const config =
+        node.nodeType === "pillar"
+          ? pillarConfigForDeployment(state.publishedArtifacts.settings, node.pillar)
+          : seedNodeConfigForDeployment(state.publishedArtifacts.settings, node.seedNode);
+      sendJsonFile(response, config);
+    });
+  });
+
+  app.get("/api/bootstrap/pillar-config.json", async (request, response) => {
+    await withBootstrapNode(request, response, (state, node) => {
+      if (node.nodeType !== "pillar") {
+        response.status(404).json({ error: "Seed nodes do not have pillar config" });
+        return;
+      }
+      if (!state.publishedArtifacts?.settings) {
+        response.status(404).json({ error: "No published release is available yet" });
+        return;
+      }
+      sendJsonFile(response, pillarConfigForDeployment(state.publishedArtifacts.settings, node.pillar));
     });
   });
 
   app.get("/api/bootstrap/producer.json", async (request, response) => {
-    await withBootstrapPillar(request, response, (_state, pillar) => {
-      sendJsonFile(response, pillar.producerWallet.keyFile);
+    await withBootstrapNode(request, response, (_state, node) => {
+      if (node.nodeType !== "pillar") {
+        response.status(404).json({ error: "Seed nodes do not have producer wallets" });
+        return;
+      }
+      sendJsonFile(response, node.pillar.producerWallet.keyFile);
     });
   });
 
   app.get("/api/bootstrap/producer-password.txt", async (request, response) => {
-    await withBootstrapPillar(request, response, (_state, pillar) => {
+    await withBootstrapNode(request, response, (_state, node) => {
+      if (node.nodeType !== "pillar") {
+        response.status(404).json({ error: "Seed nodes do not have producer wallets" });
+        return;
+      }
       response.setHeader("Content-Type", "text/plain; charset=utf-8");
       response.setHeader("Cache-Control", "no-store");
-      response.send(`${producerPassword(pillar)}\n`);
+      response.send(`${producerPassword(node.pillar)}\n`);
+    });
+  });
+
+  app.get("/api/bootstrap/network-private-key", async (request, response) => {
+    await withBootstrapNode(request, response, (_state, node) => {
+      if (node.nodeType !== "seed") {
+        response.status(404).json({ error: "Pillar nodes do not have managed network private keys" });
+        return;
+      }
+      response.setHeader("Content-Type", "text/plain; charset=utf-8");
+      response.setHeader("Cache-Control", "no-store");
+      response.send(`${decryptText(node.seedNode.networkPrivateKeyCipher)}\n`);
     });
   });
 
@@ -820,24 +1048,33 @@ async function main() {
     const user = (request as AuthedRequest).user;
     const state = await readState();
     const pillar = state.pillars.find((candidate) => candidate.userId === user.id);
+    const seedNode = state.seedNodes.find((candidate) => candidate.userId === user.id);
+    const bootstrapRecord = pillar ?? seedNode;
     response.json({
       user,
       pillar: pillar ? toPublicPillar(pillar) : undefined,
-      bootstrap: pillar?.statusTokenCipher ? { statusToken: statusToken(pillar) } : undefined
+      seedNode: seedNode ? publicSeedNode(seedNode) : undefined,
+      bootstrap: bootstrapRecord?.statusTokenCipher ? { statusToken: statusToken(bootstrapRecord) } : undefined
     });
   });
 
   app.post("/api/pillar", requireAuth(), async (request, response) => {
     const user = (request as AuthedRequest).user;
-    const parsed = pillarSchema.safeParse(request.body);
+    const parsed = nodeRegistrationSchema.safeParse(request.body);
     if (!parsed.success) {
-      response.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid pillar name" });
+      response.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid node registration" });
       return;
     }
 
     try {
-      const pillar = await createPillar(user.id, parsed.data.pillarName);
-      response.status(201).json({ pillar: toPublicPillar(pillar) });
+      if (parsed.data.nodeType === "pillar") {
+        const pillar = await createPillar(user.id, parsed.data.pillarName);
+        response.status(201).json({ pillar: toPublicPillar(pillar) });
+        return;
+      }
+
+      const seedNode = await createSeedNode(user.id, parsed.data.nodeName, parsed.data.publicIp, parsed.data.p2pPort);
+      response.status(201).json({ seedNode: publicSeedNode(seedNode) });
     } catch (error: unknown) {
       response.status(409).json({ error: (error as Error).message });
     }
@@ -847,17 +1084,32 @@ async function main() {
     const user = (request as AuthedRequest).user;
     const state = await readState();
     const pillar = state.pillars.find((candidate) => candidate.userId === user.id);
-    if (!pillar) {
-      response.status(404).json({ error: "No pillar registered" });
+    const seedNode = state.seedNodes.find((candidate) => candidate.userId === user.id);
+    if (!pillar && !seedNode) {
+      response.status(404).json({ error: "No node registered" });
       return;
     }
 
-    const body = await buildPillarPackage(state.settings, pillar);
+    if (pillar) {
+      const body = await buildPillarPackage(state.settings, pillar);
+      await updateState((draft) => {
+        const target = draft.pillars.find((candidate) => candidate.id === pillar.id);
+        if (target) target.packageDownloadedAt = new Date().toISOString();
+      });
+      sendDownload(response, `${pillar.pillarName}-pillar-package.zip`, "application/zip", body);
+      return;
+    }
+    if (!seedNode) {
+      response.status(404).json({ error: "No seed node registered" });
+      return;
+    }
+
+    const body = await buildSeedNodePackage(state.settings, seedNode);
     await updateState((draft) => {
-      const target = draft.pillars.find((candidate) => candidate.id === pillar.id);
+      const target = draft.seedNodes.find((candidate) => candidate.id === seedNode.id);
       if (target) target.packageDownloadedAt = new Date().toISOString();
     });
-    sendDownload(response, `${pillar.pillarName}-pillar-package.zip`, "application/zip", body);
+    sendDownload(response, `${seedNode.nodeName}-seed-node-package.zip`, "application/zip", body);
   });
 
   app.get("/api/admin/overview", requireAuth("admin"), async (request, response) => {
@@ -868,6 +1120,7 @@ async function main() {
       settings: publicSettings(state.settings),
       users: managedUsers(state),
       pillars: state.pillars.map(toPublicPillar),
+      seedNodes: state.seedNodes.map(publicSeedNode),
       readiness: readiness(state),
       genesis: state.finalizedGenesis?.genesis ?? buildGenesis(state.settings, state.pillars),
       configTemplate: buildNodeConfig(state.settings),
@@ -952,12 +1205,17 @@ async function main() {
         }
 
         const hadPillar = state.pillars.some((pillar) => pillar.userId === user.id);
+        const deletedSeedEnodes = state.seedNodes.filter((seedNode) => seedNode.userId === user.id).map((seedNode) => seedNode.enode);
         state.users = state.users.filter((candidate) => candidate.id !== user.id);
         state.sessions = state.sessions.filter((session) => session.userId !== user.id);
         state.pillars = state.pillars.filter((pillar) => pillar.userId !== user.id);
+        state.seedNodes = state.seedNodes.filter((seedNode) => seedNode.userId !== user.id);
+        if (deletedSeedEnodes.length) {
+          state.settings.seeders = state.settings.seeders.filter((seeder) => !deletedSeedEnodes.includes(seeder));
+        }
         if (hadPillar) state.finalizedGenesis = undefined;
 
-        return { deletedUserId: user.id, deletedPillar: hadPillar };
+        return { deletedUserId: user.id, deletedPillar: hadPillar, deletedSeedNodes: deletedSeedEnodes.length };
       });
       response.json(result);
     } catch (error: unknown) {
@@ -977,6 +1235,23 @@ async function main() {
         return toPublicPillar(deleted);
       });
       response.json({ pillar });
+    } catch (error: unknown) {
+      response.status(404).json({ error: (error as Error).message });
+    }
+  });
+
+  app.delete("/api/admin/seed-nodes/:seedNodeId", requireAuth("admin"), async (request, response) => {
+    const seedNodeId = String(request.params.seedNodeId);
+    try {
+      const seedNode = await updateState((state) => {
+        const index = state.seedNodes.findIndex((candidate) => candidate.id === seedNodeId);
+        if (index < 0) throw new Error("Seed node not found");
+
+        const [deleted] = state.seedNodes.splice(index, 1);
+        state.settings.seeders = state.settings.seeders.filter((seeder) => seeder !== deleted.enode);
+        return publicSeedNode(deleted);
+      });
+      response.json({ seedNode });
     } catch (error: unknown) {
       response.status(404).json({ error: (error as Error).message });
     }
@@ -1035,6 +1310,7 @@ async function main() {
         seeders: [...settings.seeders]
       };
       state.settings.wipeDataOnPublish = false;
+      state.settings.releaseApplyAtSec = undefined;
       return state.publishedArtifacts;
     });
     response.json({ published: publishedInfo(result) });

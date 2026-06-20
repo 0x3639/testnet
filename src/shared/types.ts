@@ -36,6 +36,22 @@ export interface PillarRecord {
   createdAt: string;
 }
 
+export interface SeedNodeRecord {
+  id: string;
+  userId: string;
+  nodeName: string;
+  publicIp: string;
+  p2pPort: number;
+  publicKey: string;
+  enode: string;
+  networkPrivateKeyCipher: string;
+  statusTokenHash?: string;
+  statusTokenCipher?: string;
+  nodeStatus?: PillarNodeStatus;
+  packageDownloadedAt?: string;
+  createdAt: string;
+}
+
 export interface SporkRecord {
   id: string;
   name: string;
@@ -55,6 +71,7 @@ export interface NetworkSettings {
   goZenonCommit?: string;
   deploymentRepo: string;
   deploymentRef: string;
+  releaseApplyAtSec?: number;
   wipeDataOnPublish: boolean;
   sporkAddress: string;
   sporkWallet?: StoredWallet;
@@ -72,6 +89,7 @@ export interface AppState {
   users: StoredUser[];
   sessions: StoredSession[];
   pillars: PillarRecord[];
+  seedNodes: SeedNodeRecord[];
   settings: NetworkSettings;
   finalizedGenesis?: {
     finalizedAt: string;
@@ -89,6 +107,8 @@ export interface AuthUser {
 export interface ManagedUser extends AuthUser {
   createdAt: string;
   pillarName?: string;
+  nodeName?: string;
+  nodeType?: "pillar" | "seed";
 }
 
 export interface PublicPillar {
@@ -98,6 +118,18 @@ export interface PublicPillar {
   rewardAddress: string;
   producerAddress: string;
   producerIndex: number;
+  createdAt: string;
+  packageDownloadedAt?: string;
+  nodeStatus?: PublicNodeStatus;
+}
+
+export interface PublicSeedNode {
+  id: string;
+  nodeName: string;
+  publicIp: string;
+  p2pPort: number;
+  publicKey: string;
+  enode: string;
   createdAt: string;
   packageDownloadedAt?: string;
   nodeStatus?: PublicNodeStatus;
@@ -123,6 +155,7 @@ export interface ReleaseTarget {
 
 export interface ReleaseActions {
   wipeData: boolean;
+  applyAt?: string;
 }
 
 export interface PublishedNodePlan extends ReleaseTarget {
@@ -130,6 +163,7 @@ export interface PublishedNodePlan extends ReleaseTarget {
   eventId: string;
   publishedAt: string;
   finalizedAt?: string;
+  genesisStartAt: string;
   actions: ReleaseActions;
 }
 
@@ -150,6 +184,7 @@ export interface PublishedArtifactsInfo {
   nodePlanPath?: string;
   chainIdentifier: number;
   seeders: string[];
+  genesisStartAt?: string;
   release?: ReleaseTarget;
   actions?: ReleaseActions;
 }
@@ -209,6 +244,7 @@ export interface AdminOverview {
   settings: PublicNetworkSettings;
   users: ManagedUser[];
   pillars: PublicPillar[];
+  seedNodes: PublicSeedNode[];
   readiness: ReadinessCheck[];
   genesis: unknown;
   configTemplate: unknown;
@@ -219,6 +255,7 @@ export interface AdminOverview {
 export interface UserOverview {
   user: AuthUser;
   pillar?: PublicPillar;
+  seedNode?: PublicSeedNode;
   bootstrap?: {
     statusToken: string;
   };

@@ -1,6 +1,6 @@
 # Zenon Testnet Builder
 
-Web tooling for coordinating a Zenon Network of Momentum testnet. The app lets an admin create operator logins, collect pillar registrations, generate operator wallet packages, build `genesis.json`, build a node `config.json`, and publish those files for unauthenticated `wget` access.
+Web tooling for coordinating a Zenon Network of Momentum testnet. The app lets an admin create operator logins, collect pillar and seed-node registrations, generate operator packages, build `genesis.json`, build a node `config.json`, and publish those files for unauthenticated `wget` access.
 
 The backend is Node/Express. The frontend is React/Vite and follows the dark, compact NoM-style interface used by `digitalSloth/nom-ui`. Wallet and address generation uses `digitalSloth/znn-typescript-sdk`.
 
@@ -8,17 +8,19 @@ The backend is Node/Express. The frontend is React/Vite and follows the dark, co
 
 - Admin and operator logins backed by local persistent state.
 - Admin-created operator credentials with password generation and copyable handoff text.
-- Operator pillar registration by pillar name.
+- Operator registration as either a pillar or a managed non-producing seed node.
 - Generated pillar, reward, and producer wallets for every registered operator.
 - Operator ZIP packages with addresses, encrypted keyfiles, wallet passwords, seed words, producer config, and producer wallet file.
+- Managed seed-node packages with generated network private key, enode, config, and status token.
 - Admin seed node discovery from a seed node IP address and RPC port.
-- Admin overview of all pillar, reward, and producer addresses.
+- Admin overview of all pillar, reward, producer, and managed seed-node addresses/enodes.
 - Live and finalized `genesis.json` preview.
 - Base non-producing `config.json` preview.
-- Public publish step for `/genesis.json` and `/config.json`.
-- Operator bootstrap command that installs go-zenon with `hypercore-one/deployment`, then writes the pillar-specific genesis, config, producer keyfile, and producer password.
-- Per-pillar node status reporting from the bootstrap agent.
-- Admin user and pillar deletion.
+- Human-readable UTC genesis start time and optional release apply time.
+- Public publish step for `/genesis.json`, `/config.json`, and `/node-plan.json`.
+- Operator bootstrap command that installs go-zenon with `hypercore-one/deployment`, then writes the node-specific genesis, config, producer files for pillars, or network private key for seed nodes.
+- Per-node status reporting from the bootstrap agent.
+- Admin user, pillar, and seed-node deletion.
 - A local four-node devnet generation script for validating the produced genesis/config artifacts.
 
 ## Planning Docs
@@ -37,6 +39,7 @@ Treat these as secret material:
 - operator ZIP packages
 - wallet passwords
 - wallet seed words
+- managed seed node network private keys
 - generated devnet `network-private-key` files
 
 The generated `data/`, `dist/`, `node_modules/`, and `devnet/four-node/` directories are intentionally ignored by git.
@@ -81,7 +84,7 @@ DEPLOYMENT_REPO=https://github.com/hypercore-one/deployment.git
 DEPLOYMENT_REF=main
 ```
 
-After the app is running, admins can edit the go-zenon repo/ref, optional commit label, deployment repo, deployment ref, and one-shot data wipe flag from the Settings panel. Saving these values only updates the draft settings. They do not reach `/node-plan.json` or authenticated bootstrap manifests until an admin clicks **Publish Release**. Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`.
+After the app is running, admins can edit the go-zenon repo/ref, optional commit label, deployment repo, deployment ref, one-shot data wipe flag, and optional release apply time from the Settings panel. Saving these values only updates the draft settings. They do not reach `/node-plan.json` or authenticated bootstrap manifests until an admin clicks **Publish Release**. Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`.
 
 ## Standalone Docker
 
@@ -235,7 +238,7 @@ Then open:
 https://<TESTNET_HOST>
 ```
 
-Sign in as `admin`, create operator accounts, collect pillar registrations, configure the seed node, finalize, and publish.
+Sign in as `admin`, create operator accounts, collect pillar and seed-node registrations, finalize, and publish.
 
 ### Updating The Stack
 
@@ -254,20 +257,22 @@ If you create a Portainer stack with the Web Editor instead of the Git Repositor
 ## Admin Workflow
 
 1. Sign in as an admin.
-2. Create one operator login per expected pillar.
+2. Create one operator login per expected pillar and managed seed node.
 3. Send each operator the copied login URL, username, and password.
-4. Ask each operator to sign in, choose a pillar name, and either download their pillar package or copy the bootstrap command.
+4. Ask each operator to sign in and register either a pillar name or a seed node name plus public IP/port.
 5. Set the go-zenon and deployment repo/ref release target in Settings.
-6. Add or probe the seed node in the admin panel so `Net.Seeders` contains the seed node enode.
-7. Review the generated `genesis.json` and `config.json`.
-8. Finalize the genesis when registrations are complete.
-9. Click **Publish Release** when the current genesis, config, seeders, and release target should become active for operators.
+6. Set **Genesis Start (UTC)** to the intended chain start time. For a coordinated restart, set it comfortably in the future.
+7. Optionally set **Apply Release At (UTC)** so nodes wait before stopping, wiping, downloading artifacts, and restarting.
+8. Add or probe any external seed nodes, and confirm managed seed nodes are present in `Net.Seeders`.
+9. Review the generated `genesis.json` and `config.json`.
+10. Finalize the genesis when registrations are complete.
+11. Click **Publish Release** when the current genesis, config, seeders, and release target should become active for operators.
 
-Admins can also reset user passwords, delete users, delete pillar registrations, and download the spork wallet package.
+Admins can also reset user passwords, delete users, delete pillar registrations, delete managed seed nodes, and download the spork wallet package.
 
-## Operator Package
+## Operator Packages
 
-Each operator downloads a ZIP containing:
+Pillar operators download a ZIP containing:
 
 - `pillar-info.json`
 - `config.json`
@@ -279,12 +284,21 @@ Each operator downloads a ZIP containing:
 
 The package `config.json` is pillar-specific and includes the producer settings. The public `/config.json` is a generic non-producing node config.
 
+Managed seed-node operators download a ZIP containing:
+
+- `seed-node-info.json`
+- `config.json`
+- `network-private-key`
+- `node/status-token.txt`
+
+Seed-node packages do not include pillar, reward, or producer wallets. The seed node enode is automatically added to draft `Net.Seeders` when the seed node registers.
+
 ## Operator Bootstrap
 
-After registering a pillar, the operator page shows a copyable command shaped like this:
+After registering a pillar or seed node, the operator page shows a copyable command shaped like this:
 
 ```bash
-curl -fsSL "https://<TESTNET_HOST>/api/bootstrap/install.sh" | sudo env ZNN_BOOTSTRAP_TOKEN="<pillar-token>" ZNN_TESTNET_URL="https://<TESTNET_HOST>" bash
+curl -fsSL "https://<TESTNET_HOST>/api/bootstrap/install.sh" | sudo env ZNN_BOOTSTRAP_TOKEN="<node-token>" ZNN_TESTNET_URL="https://<TESTNET_HOST>" bash
 ```
 
 Run it on the node host. The script is intended for the same Linux/systemd style environment supported by `hypercore-one/deployment`.
@@ -297,25 +311,26 @@ The bootstrap flow before a release is published:
 4. Reports a `Waiting` node status to the admin panel.
 5. Keeps polling until an admin clicks **Publish Release**.
 
-After **Publish Release**, the agent:
+After **Publish Release**, the agent waits until `actions.applyAt` if that timestamp is present and in the future. When the apply time has arrived, the agent:
 
-1. Downloads the authenticated bootstrap manifest with the pillar token.
+1. Downloads the authenticated bootstrap manifest with the node token.
 2. Clones `DEPLOYMENT_REPO` at `DEPLOYMENT_REF`.
 3. Runs `./zenon.sh --deploy zenon "$GO_ZENON_REPO" "$GO_ZENON_REF"` to build and install go-zenon.
 4. Stops `go-zenon`.
 5. Wipes node data if the published node plan has `actions.wipeData: true`.
 6. Writes `/root/.znn/genesis.json`.
-7. Writes the pillar-specific `/root/.znn/config.json`.
-8. Writes `/root/.znn/wallet/producer.json` and `/root/.znn/wallet/producer-password.txt`.
-9. Restarts `go-zenon` and sends a status report.
+7. Writes the node-specific `/root/.znn/config.json`.
+8. For pillars, writes `/root/.znn/wallet/producer.json` and `/root/.znn/wallet/producer-password.txt`.
+9. For managed seed nodes, writes `/root/.znn/network-private-key`.
+10. Restarts `go-zenon` and sends a status report.
 
-The wipe action is controlled by **Wipe node data on next Publish Release** in admin Settings. It is one-shot: publishing a release snapshots the flag into `/node-plan.json`, then clears the draft checkbox. The agent preserves `/root/.znn/wallet`, `/root/.znn/genesis.json`, `/root/.znn/config.json`, and `/root/.znn/network-private-key`, and removes other files/directories under `/root/.znn` before writing the published artifacts.
+The wipe action is controlled by **Wipe node data on next Publish Release** in admin Settings. It is one-shot: publishing a release snapshots the flag into `/node-plan.json`, then clears the draft checkbox. **Apply Release At (UTC)** is also one-shot: publishing snapshots it into `/node-plan.json`, then clears the draft field. The agent preserves `/root/.znn/wallet`, `/root/.znn/genesis.json`, `/root/.znn/config.json`, and `/root/.znn/network-private-key`, and removes other files/directories under `/root/.znn` before writing the published artifacts.
 
-The token in the bootstrap command also authorizes producer downloads and node status reporting. Treat it like an operator secret.
+The token in the bootstrap command also authorizes node-specific downloads and node status reporting. Treat it like an operator secret.
 
 ## Node Status Reporting
 
-Each registered pillar receives a private node status token in its operator package and bootstrap command. The installed agent uses that token to report health back to the orchestrator without exposing the app username or password.
+Each registered pillar or managed seed node receives a private node status token in its operator package and bootstrap command. The installed agent uses that token to report health back to the orchestrator without exposing the app username or password.
 
 Heartbeat reports are sent with a bearer token:
 
@@ -347,7 +362,7 @@ curl -fsS -X POST "https://<TESTNET_HOST>/api/bootstrap/status" \
   }'
 ```
 
-The admin panel shows the latest report for each pillar, including last seen time, service status, sync height, height lag, peer count, installed ref, and recent log error counts. The server keeps a rolling 24-hour minute-sample history per pillar and the latest full report.
+The admin panel shows the latest report for each pillar and managed seed node, including last seen time, service status, sync height, height lag, peer count, installed ref, and recent log error counts. The server keeps a rolling 24-hour minute-sample history per node and the latest full report.
 
 ## Published Files
 
@@ -371,13 +386,23 @@ https://<TESTNET_HOST>/node-plan.json
 
 Publishing stores a snapshot. If settings, seeders, pillars, finalized genesis data, release target values, or the wipe flag change later, save them as draft changes first, then click **Publish Release** again to update the public files and node plan. Saving settings alone does not force an upgrade or wipe.
 
-## Seeders
+`/node-plan.json` includes:
+
+- `genesisStartAt`: the UTC time converted from `GenesisTimestampSec`.
+- `actions.applyAt`: optional UTC time when agents should apply the published release.
+- `actions.wipeData`: whether agents should wipe node data before writing the release artifacts.
+
+For a coordinated devnet restart, publish the release with `actions.applyAt` before `genesisStartAt`. With the bundled one-minute cron, a 10-30 minute gap is usually enough for all nodes to stop, wipe if requested, download artifacts, restart, and then wait inside go-zenon for the future genesis timestamp.
+
+## Seeders And Managed Seed Nodes
 
 In the admin panel, enter a seed node IP address and probe it before publishing the config. The app calls the seed node RPC on port `35997` by default, reads `stats.networkInfo.self.publicKey`, and saves an `enode://<public-key>@<ip>:35995` entry into `Net.Seeders`.
 
 Use the node's public IP address. If RPC or p2p is exposed on non-default ports, adjust the ports in the seed node form before probing.
 
-The public `config.json` includes the saved seeders and no `Producer` block. Operator package configs include producer settings and wallet references.
+Alternatively, create an operator user for a managed seed node. That user registers a seed node name and public IP/port. The app generates the network private key, derives the enode, saves the enode in draft seeders, and gives the operator a seed-node bootstrap command. Managed seed nodes are non-producing nodes and are not included in `genesis.json` pillar allocations.
+
+The public `config.json` includes the saved seeders and no `Producer` block. Pillar package configs include producer settings and wallet references. Managed seed-node configs exclude their own enode from `Net.Seeders`.
 
 ## Genesis Policy
 
@@ -460,6 +485,8 @@ Operator bootstrap:
 
 - `GET /api/bootstrap/install.sh`
 - `GET /api/bootstrap/manifest`
+- `GET /api/bootstrap/node-config.json`
 - `GET /api/bootstrap/pillar-config.json`
 - `GET /api/bootstrap/producer.json`
 - `GET /api/bootstrap/producer-password.txt`
+- `GET /api/bootstrap/network-private-key`

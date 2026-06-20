@@ -2,7 +2,7 @@ import JSZip from "jszip";
 import { KeyFile } from "znn-typescript-sdk";
 import { decryptText } from "./crypto.js";
 import { buildNodeConfig } from "./genesis.js";
-import type { NetworkSettings, PillarRecord, StoredWallet } from "../shared/types.js";
+import type { NetworkSettings, PillarRecord, SeedNodeRecord, StoredWallet } from "../shared/types.js";
 
 function pretty(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -12,8 +12,8 @@ function walletPassword(wallet: StoredWallet): string {
   return decryptText(wallet.passwordCipher);
 }
 
-function statusToken(pillar: PillarRecord): string {
-  return pillar.statusTokenCipher ? decryptText(pillar.statusTokenCipher) : "";
+function statusToken(record: { statusTokenCipher?: string }): string {
+  return record.statusTokenCipher ? decryptText(record.statusTokenCipher) : "";
 }
 
 async function walletSeedWords(wallet: StoredWallet): Promise<string> {
@@ -132,6 +132,48 @@ Copy \`wallets/producer.json\` to the path referenced by \`config.json\`:
 
 The final network \`genesis.json\` is provided by the testnet admin after registration closes.
 Keep every password and seed phrase in this package private.
+`
+  );
+
+  return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+}
+
+export async function buildSeedNodePackage(settings: NetworkSettings, seedNode: SeedNodeRecord): Promise<Buffer> {
+  const zip = new JSZip();
+  const config = buildNodeConfig(settings);
+  const seedConfig = {
+    ...config,
+    Name: seedNode.nodeName,
+    Net: {
+      ...config.Net,
+      Seeders: settings.seeders.filter((seeder) => seeder !== seedNode.enode)
+    }
+  };
+
+  zip.file(
+    "seed-node-info.json",
+    pretty({
+      nodeName: seedNode.nodeName,
+      publicIp: seedNode.publicIp,
+      p2pPort: seedNode.p2pPort,
+      publicKey: seedNode.publicKey,
+      enode: seedNode.enode,
+      nodeStatus: {
+        endpoint: "/api/bootstrap/status",
+        tokenFile: "node/status-token.txt",
+        interval: "1 minute"
+      }
+    })
+  );
+  zip.file("config.json", pretty(seedConfig));
+  zip.file("network-private-key", `${decryptText(seedNode.networkPrivateKeyCipher)}\n`);
+  zip.file("node/status-token.txt", `${statusToken(seedNode)}\n`);
+  zip.file(
+    "README.md",
+    `# ${seedNode.nodeName} Seed Node Package
+
+This is a non-producing seed node package. It does not include pillar, reward, or producer wallets.
+Keep \`network-private-key\` and \`node/status-token.txt\` private.
 `
   );
 

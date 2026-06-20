@@ -23,6 +23,7 @@ import type {
   PublishedArtifactsInfo,
   PublicNetworkSettings,
   PublicPillar,
+  PublicSeedNode,
   ReadinessCheck,
   Role,
   SeedNodeProbeResult,
@@ -76,6 +77,25 @@ function bootstrapCommand(token: string): string {
   return `curl -fsSL ${shellQuote(publicUrl("/api/bootstrap/install.sh"))} | sudo env ZNN_BOOTSTRAP_TOKEN=${shellQuote(
     token
   )} ZNN_TESTNET_URL=${shellQuote(baseUrl)} bash`;
+}
+
+function toUtcDateTimeInput(seconds?: number): string {
+  if (!seconds) return "";
+  return new Date(seconds * 1000).toISOString().slice(0, 16);
+}
+
+function fromUtcDateTimeInput(value: string): number | undefined {
+  if (!value) return undefined;
+  const timestamp = Date.parse(`${value}:00Z`);
+  return Number.isNaN(timestamp) ? undefined : Math.floor(timestamp / 1000);
+}
+
+function utcSecondsFromNow(minutes: number): number {
+  return Math.floor((Date.now() + minutes * 60 * 1000) / 1000);
+}
+
+function formatUtc(value: string): string {
+  return `${new Date(value).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 function generatePassword(length = 24): string {
@@ -203,9 +223,15 @@ function Shell({ user, children, onLogout }: { user: AuthUser; children: React.R
 
 function OperatorView({ session, refresh }: { session: UserOverview; refresh: () => Promise<void> }) {
   const [pillarName, setPillarName] = useState("");
+  const [nodeName, setNodeName] = useState("");
+  const [seedPublicIp, setSeedPublicIp] = useState("");
+  const [seedP2pPort, setSeedP2pPort] = useState(35995);
+  const [registerSeedNode, setRegisterSeedNode] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const command = session.bootstrap?.statusToken ? bootstrapCommand(session.bootstrap.statusToken) : "";
+  const hasNode = Boolean(session.pillar || session.seedNode);
+  const displayName = session.pillar?.pillarName ?? session.seedNode?.nodeName ?? "Register Node";
 
   async function register(event: FormEvent) {
     event.preventDefault();
@@ -214,9 +240,16 @@ function OperatorView({ session, refresh }: { session: UserOverview; refresh: ()
     try {
       await api("/api/pillar", {
         method: "POST",
-        body: JSON.stringify({ pillarName })
+        body: JSON.stringify(
+          registerSeedNode
+            ? { nodeType: "seed", nodeName, publicIp: seedPublicIp, p2pPort: seedP2pPort }
+            : { nodeType: "pillar", pillarName }
+        )
       });
       setPillarName("");
+      setNodeName("");
+      setSeedPublicIp("");
+      setSeedP2pPort(35995);
       await refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -230,7 +263,7 @@ function OperatorView({ session, refresh }: { session: UserOverview; refresh: ()
       <section>
         <div className="sectionTitle">
           <span className="ledger">Operator</span>
-          <h1>{session.pillar ? session.pillar.pillarName : "Register Pillar"}</h1>
+          <h1>{displayName}</h1>
         </div>
         {session.pillar ? (
           <div className="panel">
@@ -263,28 +296,104 @@ function OperatorView({ session, refresh }: { session: UserOverview; refresh: ()
               </div>
             ) : null}
           </div>
+        ) : session.seedNode ? (
+          <div className="panel">
+            <div className="detailGrid">
+              <Field label="Public IP" value={<span className="mono">{session.seedNode.publicIp}</span>} />
+              <Field label="P2P Port" value={<span className="mono">{session.seedNode.p2pPort}</span>} />
+              <Field label="Public Key" value={<AddressValue value={session.seedNode.publicKey} />} />
+              <Field label="Enode" value={<AddressValue value={session.seedNode.enode} />} />
+            </div>
+            <div className="toolbar">
+              <Button icon={<Download size={18} />} onClick={() => download("/api/pillar/package")}>
+                Download Package
+              </Button>
+              {command ? (
+                <Button variant="secondary" icon={<Copy size={18} />} onClick={() => copy(command)}>
+                  Copy Bootstrap
+                </Button>
+              ) : null}
+            </div>
+            {command ? (
+              <div className="bootstrapBlock">
+                <div className="panelHeader">
+                  <div>
+                    <span className="ledger">Node Bootstrap</span>
+                    <h2>Install command</h2>
+                  </div>
+                  <Terminal size={20} />
+                </div>
+                <pre className="commandBlock">{command}</pre>
+              </div>
+            ) : null}
+          </div>
         ) : (
           <form className="panel stack" onSubmit={register}>
-            <label>
-              <span>Pillar Name</span>
-              <input value={pillarName} onChange={(event) => setPillarName(event.target.value)} maxLength={40} />
+            <label className="checkboxRow">
+              <input
+                type="checkbox"
+                checked={registerSeedNode}
+                onChange={(event) => setRegisterSeedNode(event.target.checked)}
+              />
+              <span>Register this account as a seed node</span>
             </label>
+            {registerSeedNode ? (
+              <>
+                <label>
+                  <span>Seed Node Name</span>
+                  <input value={nodeName} onChange={(event) => setNodeName(event.target.value)} maxLength={40} />
+                </label>
+                <div className="formGrid">
+                  <label>
+                    <span>Public IP</span>
+                    <input className="mono" value={seedPublicIp} onChange={(event) => setSeedPublicIp(event.target.value)} />
+                  </label>
+                  <label>
+                    <span>P2P Port</span>
+                    <input
+                      className="mono"
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={seedP2pPort}
+                      onChange={(event) => setSeedP2pPort(Number(event.target.value))}
+                    />
+                  </label>
+                </div>
+              </>
+            ) : (
+              <label>
+                <span>Pillar Name</span>
+                <input value={pillarName} onChange={(event) => setPillarName(event.target.value)} maxLength={40} />
+              </label>
+            )}
             {error ? <div className="alert">{error}</div> : null}
             <Button type="submit" icon={<UserPlus size={18} />} disabled={loading}>
-              {loading ? "Creating" : "Create Pillar"}
+              {loading ? "Creating" : registerSeedNode ? "Create Seed Node" : "Create Pillar"}
             </Button>
           </form>
         )}
       </section>
-      <section className="panel mutedPanel">
-        <span className="ledger">Allocation</span>
-        <div className="amountRows">
-          <AmountRow label="Pillar" znn="50,000" qsr="500,000" />
-          <AmountRow label="Fused Producer" qsr="1,000" />
-          <AmountRow label="Fused Pillar" qsr="1,000" />
-          <AmountRow label="Fused Reward" qsr="1,000" />
-        </div>
-      </section>
+      {session.seedNode && !session.pillar ? (
+        <section className="panel mutedPanel">
+          <span className="ledger">Seed Node</span>
+          <div className="detailGrid singleColumn">
+            <Field label="Producer" value={<span className="mutedText">Not used</span>} />
+            <Field label="Pillar Wallet" value={<span className="mutedText">Not used</span>} />
+            <Field label="Seeder" value={<span className="mono">Managed enode</span>} />
+          </div>
+        </section>
+      ) : (
+        <section className="panel mutedPanel">
+          <span className="ledger">{hasNode ? "Allocation" : "Pillar Allocation"}</span>
+          <div className="amountRows">
+            <AmountRow label="Pillar" znn="50,000" qsr="500,000" />
+            <AmountRow label="Fused Producer" qsr="1,000" />
+            <AmountRow label="Fused Pillar" qsr="1,000" />
+            <AmountRow label="Fused Reward" qsr="1,000" />
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -413,8 +522,8 @@ function UserManagement({
   }
 
   async function deleteUser(user: ManagedUser) {
-    const pillarText = user.pillarName ? ` and remove pillar ${user.pillarName}` : "";
-    if (!window.confirm(`Delete user ${user.username}${pillarText}?`)) return;
+    const nodeText = user.nodeName ? ` and remove ${user.nodeType === "seed" ? "seed node" : "pillar"} ${user.nodeName}` : "";
+    if (!window.confirm(`Delete user ${user.username}${nodeText}?`)) return;
 
     setBusy(`delete:${user.id}`);
     setError("");
@@ -486,7 +595,7 @@ function UserManagement({
             <tr>
               <th>Username</th>
               <th>Role</th>
-              <th>Pillar</th>
+              <th>Node</th>
               <th>Created</th>
               <th>Password</th>
               <th>Actions</th>
@@ -500,7 +609,16 @@ function UserManagement({
                   {user.id === currentUser.id ? <span className="currentUserTag">You</span> : null}
                 </td>
                 <td className="mono">{user.role === "admin" ? "admin" : "operator"}</td>
-                <td>{user.pillarName ?? <span className="mutedText">None</span>}</td>
+                <td>
+                  {user.nodeName ? (
+                    <>
+                      {user.nodeName}
+                      <span className="currentUserTag">{user.nodeType === "seed" ? "Seed" : "Pillar"}</span>
+                    </>
+                  ) : (
+                    <span className="mutedText">None</span>
+                  )}
+                </td>
                 <td className="mono">{new Date(user.createdAt).toLocaleString()}</td>
                 <td>
                   <form className="resetPasswordForm" onSubmit={(event) => resetPassword(event, user)}>
@@ -550,6 +668,8 @@ function PublishedArtifacts({ published }: { published: PublishedArtifactsInfo }
         <div className="toolbar">
           <span className="mono mutedText">chain {published.chainIdentifier}</span>
           <span className="mono mutedText">{published.seeders.length} seeder{published.seeders.length === 1 ? "" : "s"}</span>
+          {published.genesisStartAt ? <span className="mono mutedText">genesis {formatUtc(published.genesisStartAt)}</span> : null}
+          {published.actions?.applyAt ? <span className="statusPill warn">Apply {formatUtc(published.actions.applyAt)}</span> : null}
           {published.release ? <span className="mono mutedText">{published.release.goZenon.ref}</span> : null}
           {published.actions?.wipeData ? <span className="statusPill warn">Wipe data</span> : null}
           <Button variant="secondary" icon={<Copy size={18} />} onClick={() => copy(wgetCommands)}>
@@ -611,14 +731,21 @@ function syncStateLabel(value?: number): string {
   return value === undefined ? "Unknown" : String(value);
 }
 
-function heightLag(pillar: PublicPillar): string {
-  const sync = pillar.nodeStatus?.latest?.sync;
+type TelemetryNode = {
+  id: string;
+  name: string;
+  nodeType: "pillar" | "seed";
+  nodeStatus?: PublicPillar["nodeStatus"];
+};
+
+function heightLag(node: TelemetryNode): string {
+  const sync = node.nodeStatus?.latest?.sync;
   if (sync?.currentHeight === undefined || sync.targetHeight === undefined) return "-";
   return String(Math.max(0, sync.targetHeight - sync.currentHeight));
 }
 
-function nodeHealth(pillar: PublicPillar): { label: string; tone: "ok" | "warn" | "bad" | "muted" } {
-  const latest = pillar.nodeStatus?.latest;
+function nodeHealth(node: TelemetryNode): { label: string; tone: "ok" | "warn" | "bad" | "muted" } {
+  const latest = node.nodeStatus?.latest;
   if (!latest) return { label: "No report", tone: "muted" };
 
   const ageMs = Date.now() - Date.parse(latest.receivedAt);
@@ -633,7 +760,7 @@ function nodeHealth(pillar: PublicPillar): { label: string; tone: "ok" | "warn" 
   return { label: "Online", tone: "ok" };
 }
 
-function NodeStatusPanel({ pillars, refresh }: { pillars: PublicPillar[]; refresh: () => Promise<void> }) {
+function NodeStatusPanel({ nodes, refresh }: { nodes: TelemetryNode[]; refresh: () => Promise<void> }) {
   return (
     <section className="panel wide">
       <div className="panelHeader">
@@ -649,7 +776,8 @@ function NodeStatusPanel({ pillars, refresh }: { pillars: PublicPillar[]; refres
         <table className="nodeStatusTable">
           <thead>
             <tr>
-              <th>Pillar</th>
+              <th>Node</th>
+              <th>Type</th>
               <th>Health</th>
               <th>Last Seen</th>
               <th>Height</th>
@@ -662,19 +790,20 @@ function NodeStatusPanel({ pillars, refresh }: { pillars: PublicPillar[]; refres
             </tr>
           </thead>
           <tbody>
-            {pillars.map((pillar) => {
-              const latest = pillar.nodeStatus?.latest;
-              const health = nodeHealth(pillar);
+            {nodes.map((node) => {
+              const latest = node.nodeStatus?.latest;
+              const health = nodeHealth(node);
               const recentLogs = latest?.logs?.recent?.join(" | ") ?? "";
               return (
-                <tr key={pillar.id}>
-                  <td>{pillar.pillarName}</td>
+                <tr key={node.id}>
+                  <td>{node.name}</td>
+                  <td className="mono">{node.nodeType}</td>
                   <td>
                     <span className={`statusPill ${health.tone}`}>{health.label}</span>
                   </td>
                   <td className="mono">{formatAge(latest?.receivedAt)}</td>
                   <td className="mono">{latest?.sync?.currentHeight ?? "-"}</td>
-                  <td className="mono">{heightLag(pillar)}</td>
+                  <td className="mono">{heightLag(node)}</td>
                   <td>{syncStateLabel(latest?.sync?.state)}</td>
                   <td className="mono">{latest?.network?.peerCount ?? "-"}</td>
                   <td className="mono">{latest?.node?.waitingForRelease ? "waiting" : latest?.node?.installedRef ?? "-"}</td>
@@ -774,12 +903,15 @@ function SettingsForm({
           />
         </label>
         <label>
-          <span>Genesis Timestamp</span>
+          <span>Genesis Start (UTC)</span>
           <input
             className="mono"
-            type="number"
-            value={draft.genesisTimestampSec}
-            onChange={(event) => setDraft({ ...draft, genesisTimestampSec: Number(event.target.value) })}
+            type="datetime-local"
+            value={toUtcDateTimeInput(draft.genesisTimestampSec)}
+            onChange={(event) => {
+              const value = fromUtcDateTimeInput(event.target.value);
+              if (value) setDraft({ ...draft, genesisTimestampSec: value });
+            }}
           />
         </label>
         <label>
@@ -855,6 +987,26 @@ function SettingsForm({
             onChange={(event) => setDraft({ ...draft, deploymentRepo: event.target.value })}
           />
         </label>
+        <label>
+          <span>Apply Release At (UTC)</span>
+          <input
+            className="mono"
+            type="datetime-local"
+            value={toUtcDateTimeInput(draft.releaseApplyAtSec)}
+            onChange={(event) => setDraft({ ...draft, releaseApplyAtSec: fromUtcDateTimeInput(event.target.value) })}
+          />
+        </label>
+        <div className="toolbar compactToolbar">
+          <Button variant="secondary" onClick={() => setDraft({ ...draft, releaseApplyAtSec: utcSecondsFromNow(30) })}>
+            Apply +30m
+          </Button>
+          <Button variant="secondary" onClick={() => setDraft({ ...draft, releaseApplyAtSec: utcSecondsFromNow(60) })}>
+            Apply +60m
+          </Button>
+          <Button variant="ghost" onClick={() => setDraft({ ...draft, releaseApplyAtSec: undefined })}>
+            Clear
+          </Button>
+        </div>
         <label className="checkboxRow">
           <input
             type="checkbox"
@@ -929,6 +1081,23 @@ function SettingsForm({
 function AdminView({ session, refresh }: { session: AdminOverview; refresh: () => Promise<void> }) {
   const [tab, setTab] = useState<"genesis" | "config">("genesis");
   const json = useMemo(() => JSON.stringify(tab === "genesis" ? session.genesis : session.configTemplate, null, 2), [session, tab]);
+  const telemetryNodes: TelemetryNode[] = useMemo(
+    () => [
+      ...session.pillars.map((pillar) => ({
+        id: pillar.id,
+        name: pillar.pillarName,
+        nodeType: "pillar" as const,
+        nodeStatus: pillar.nodeStatus
+      })),
+      ...session.seedNodes.map((seedNode) => ({
+        id: seedNode.id,
+        name: seedNode.nodeName,
+        nodeType: "seed" as const,
+        nodeStatus: seedNode.nodeStatus
+      }))
+    ],
+    [session.pillars, session.seedNodes]
+  );
   const [adminError, setAdminError] = useState("");
   const [publishing, setPublishing] = useState(false);
 
@@ -941,6 +1110,7 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
         expectedPillars: settings.expectedPillars,
         minPillars: settings.minPillars,
         genesisTimestampSec: settings.genesisTimestampSec,
+        releaseApplyAtSec: settings.releaseApplyAtSec,
         goZenonRepo: settings.goZenonRepo,
         goZenonRef: settings.goZenonRef,
         goZenonCommit: settings.goZenonCommit,
@@ -995,6 +1165,17 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
     }
   }
 
+  async function deleteSeedNode(seedNode: PublicSeedNode) {
+    if (!window.confirm(`Delete seed node ${seedNode.nodeName}?`)) return;
+    setAdminError("");
+    try {
+      await api(`/api/admin/seed-nodes/${seedNode.id}`, { method: "DELETE" });
+      await refresh();
+    } catch (err) {
+      setAdminError((err as Error).message);
+    }
+  }
+
   async function finalize() {
     await api("/api/admin/finalize", { method: "POST" });
     await refresh();
@@ -1028,7 +1209,7 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
         onResetPassword={resetUserPassword}
         onDeleteUser={deleteUser}
       />
-      <NodeStatusPanel pillars={session.pillars} refresh={refresh} />
+      <NodeStatusPanel nodes={telemetryNodes} refresh={refresh} />
       <section className="panel wide">
         <div className="panelHeader">
           <div>
@@ -1072,6 +1253,53 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
                   <td className="mono">{new Date(pillar.createdAt).toLocaleString()}</td>
                   <td>
                     <Button variant="danger" icon={<Trash2 size={18} />} onClick={() => deletePillar(pillar)}>
+                      Delete
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panelHeader">
+          <div>
+            <span className="ledger">Seed Nodes</span>
+            <h2>{session.seedNodes.length} Managed</h2>
+          </div>
+          <Button variant="secondary" icon={<RefreshCcw size={18} />} onClick={refresh}>
+            Refresh
+          </Button>
+        </div>
+        <div className="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>IP</th>
+                <th>P2P</th>
+                <th>Public Key</th>
+                <th>Enode</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {session.seedNodes.map((seedNode) => (
+                <tr key={seedNode.id}>
+                  <td>{seedNode.nodeName}</td>
+                  <td className="mono">{seedNode.publicIp}</td>
+                  <td className="mono">{seedNode.p2pPort}</td>
+                  <td>
+                    <AddressValue value={seedNode.publicKey} />
+                  </td>
+                  <td>
+                    <AddressValue value={seedNode.enode} />
+                  </td>
+                  <td className="mono">{new Date(seedNode.createdAt).toLocaleString()}</td>
+                  <td>
+                    <Button variant="danger" icon={<Trash2 size={18} />} onClick={() => deleteSeedNode(seedNode)}>
                       Delete
                     </Button>
                   </td>

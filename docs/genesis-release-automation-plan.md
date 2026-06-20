@@ -5,10 +5,10 @@ This plan describes the next iteration of the Zenon Testnet Builder: each testne
 The goal is that an operator can:
 
 1. Receive a login from the admin.
-2. Register a pillar name in the web app.
+2. Register either a pillar name or managed seed node in the web app.
 3. Copy one bootstrap command from the web app.
 4. Run that command on a fresh node.
-5. Let the script download the deployment tooling, producer wallet, pillar config, genesis, and release target automatically.
+5. Let the script download the deployment tooling, node-specific config, genesis, and release target automatically.
 
 ## Core Concepts
 
@@ -25,6 +25,7 @@ Each genesis event should keep:
 - expected pillars
 - minimum pillars
 - selected pillar records
+- selected managed seed node records
 - removed or excluded pillar records
 - finalized `genesis.json`
 - published public `config.json`
@@ -34,6 +35,8 @@ Each genesis event should keep:
 - optional pinned commit SHA
 - deployment repo URL and ref
 - publish timestamps
+- genesis start time
+- apply release time
 - release notes or admin message
 
 Suggested statuses:
@@ -62,6 +65,18 @@ Admins should be able to:
 
 Removing a pillar from a new genesis event should not delete the historical record. It should only exclude that pillar from the active event's finalized artifacts.
 
+### Managed Seed Nodes
+
+Seed nodes are event-scoped non-producing nodes. A seed node registration should generate a secp256k1 network private key, derive the node public key, build an `enode://<public-key>@<ip>:<port>` entry, and add that enode to draft `Net.Seeders`.
+
+Seed nodes should:
+
+- receive a node-specific bootstrap token
+- receive a seed-node package with `network-private-key`, config, and status token
+- be shown in admin telemetry
+- be removable from the current event and draft seeder list
+- never receive pillar, reward, or producer wallet allocations
+
 ### Configurable go-zenon Source
 
 The admin panel should expose release fields per genesis event:
@@ -71,7 +86,7 @@ The admin panel should expose release fields per genesis event:
 - `goZenonCommit`
 - `deploymentRepoUrl`
 - `deploymentRef`
-- `notBefore`
+- `applyAt`
 - `staggerSeconds`
 - rollout status
 - admin release message
@@ -120,21 +135,24 @@ Example:
     "commit": "optional-pinned-commit"
   },
   "actions": {
-    "wipeData": false
+    "wipeData": false,
+    "applyAt": "2026-06-27T17:45:00Z"
   },
   "deployment": {
     "repoUrl": "https://github.com/hypercore-one/deployment.git",
     "ref": "main"
   },
-  "notBefore": "2026-06-27T18:00:00Z",
+  "genesisStartAt": "2026-06-27T18:00:00Z",
   "staggerSeconds": 900,
   "message": "Devnet release candidate is ready"
 }
 ```
 
+The current implementation uses `actions.applyAt` as the node-side stop/apply/wipe/restart gate, and `genesisStartAt` as the consensus start time derived from `GenesisTimestampSec`.
+
 ## Operator-Specific Bootstrap Endpoints
 
-Producer material must be authenticated and scoped to one pillar.
+Producer material and seed-node network private keys must be authenticated and scoped to one node.
 
 Do not embed the operator's website username and password in the script. Instead, the app should generate a scoped bootstrap token for the registered pillar.
 
@@ -143,20 +161,22 @@ Suggested endpoints:
 ```text
 GET /api/bootstrap/install.sh
 GET /api/bootstrap/manifest
+GET /api/bootstrap/node-config.json
 GET /api/bootstrap/pillar-config.json
 GET /api/bootstrap/producer.json
 GET /api/bootstrap/producer-password.txt
+GET /api/bootstrap/network-private-key
 GET /node-plan.json
 POST /api/bootstrap/status
 ```
 
-The token should authorize only one pillar for one genesis event. The admin and operator should be able to rotate or revoke it.
+The token should authorize only one node for one genesis event. The admin and operator should be able to rotate or revoke it.
 
-The first implemented slice uses a pillar-scoped bootstrap/status token in the operator ZIP package and operator page. That token authorizes `GET /api/bootstrap/manifest`, the pillar-specific config and producer download endpoints, `POST /api/bootstrap/status`, and `POST /api/node/status`.
+The first implemented slice uses a node-scoped bootstrap/status token in the operator ZIP package and operator page. That token authorizes `GET /api/bootstrap/manifest`, node-specific config downloads, pillar producer downloads or seed-node network private key downloads, `POST /api/bootstrap/status`, and `POST /api/node/status`.
 
 ### Bootstrap Manifest
 
-The authenticated manifest combines public network info with pillar-specific artifact URLs.
+The authenticated manifest combines public network info with node-specific artifact URLs.
 
 Example:
 
@@ -164,12 +184,14 @@ Example:
 {
   "schemaVersion": 1,
   "eventId": "devnet-2026-06",
+  "nodeType": "pillar",
   "pillarName": "example-pillar",
+  "nodeName": "example-pillar",
   "pillarAddress": "z1...",
   "rewardAddress": "z1...",
   "producerAddress": "z1...",
   "genesisUrl": "https://testnet.zenon.info/genesis.json",
-  "configUrl": "https://testnet.zenon.info/api/bootstrap/pillar-config.json",
+  "configUrl": "https://testnet.zenon.info/api/bootstrap/node-config.json",
   "producerKeyFileUrl": "https://testnet.zenon.info/api/bootstrap/producer.json",
   "producerPasswordUrl": "https://testnet.zenon.info/api/bootstrap/producer-password.txt",
   "nodePlanUrl": "https://testnet.zenon.info/node-plan.json",
@@ -178,7 +200,8 @@ Example:
     "ref": "devnet-v1.0.0-rc1"
   },
   "actions": {
-    "wipeData": false
+    "wipeData": false,
+    "applyAt": "2026-06-27T17:45:00Z"
   },
   "deployment": {
     "repoUrl": "https://github.com/hypercore-one/deployment.git",
@@ -186,6 +209,8 @@ Example:
   }
 }
 ```
+
+Seed-node manifests use `nodeType: "seed"` and include `nodeName`, `publicIp`, `p2pPort`, `publicKey`, `enode`, and `networkPrivateKeyUrl` instead of producer wallet URLs.
 
 ## Bootstrap Script Behavior
 
@@ -206,13 +231,14 @@ The implemented first-pass script:
 7. Clone `hypercore-one/deployment`.
 8. Run the deployment script to build and install go-zenon.
 9. Stop `go-zenon`.
-10. Wipe data when the published plan has `actions.wipeData: true`.
-11. Create `/root/.znn` and `/root/.znn/wallet`.
-12. Download `genesis.json`.
-13. Download the pillar-specific `config.json`.
-14. Download the producer keyfile and password.
-15. Write files with strict permissions.
-16. Restart `go-zenon` and send a status report.
+10. Wait until `actions.applyAt` when present.
+11. Wipe data when the published plan has `actions.wipeData: true`.
+12. Create `/root/.znn` and `/root/.znn/wallet`.
+13. Download `genesis.json`.
+14. Download the node-specific `config.json`.
+15. Download the producer keyfile/password for pillars or `network-private-key` for managed seed nodes.
+16. Write files with strict permissions.
+17. Restart `go-zenon` and send a status report.
 
 The deployment repo already supports non-interactive deployment:
 
@@ -249,7 +275,7 @@ State should include:
 
 ## Node Status Reporting
 
-Each pillar node should push a heartbeat to the orchestrator every minute. The orchestrator should not rely on inbound RPC access to every node because operators may run behind firewalls or NAT.
+Each pillar or managed seed node should push a heartbeat to the orchestrator every minute. The orchestrator should not rely on inbound RPC access to every node because operators may run behind firewalls or NAT.
 
 The node agent should collect:
 
@@ -274,7 +300,7 @@ Heartbeat endpoint:
 
 ```text
 POST /api/bootstrap/status
-Authorization: Bearer <pillar-status-token>
+Authorization: Bearer <node-status-token>
 ```
 
 Example payload:
@@ -312,8 +338,8 @@ Example payload:
 
 The server should keep:
 
-- latest full report per pillar
-- rolling minute-sample history per pillar
+- latest full report per node
+- rolling minute-sample history per node
 - stale status derived from `receivedAt`
 
 The admin panel should show:
@@ -341,10 +367,11 @@ The installed agent collects `stats.syncInfo`, `stats.networkInfo`, local system
 
 ## Config Rules
 
-There are two config types:
+There are three config types:
 
 - public generic `config.json`
 - authenticated pillar-specific `config.json`
+- authenticated managed seed-node `config.json`
 
 The public config must not include a `Producer` block.
 
@@ -357,6 +384,8 @@ The pillar-specific config must include:
 - genesis file path
 - RPC settings
 - network settings
+
+The managed seed-node config must omit `Producer`, use the seed-node name, include the published genesis path, and exclude its own enode from `Net.Seeders`.
 
 The bootstrap script should never overwrite a pillar config with the generic public config after the first install. If seeders change, the script should either download a fresh pillar-specific config or merge only safe network fields while preserving the `Producer` block.
 
@@ -386,7 +415,7 @@ Add per-event release fields:
 - deployment ref. Done as a persisted admin setting.
 - explicit publish gate for `/node-plan.json`. Done.
 - one-shot wipe data flag. Done as a published release action.
-- not-before time
+- not-before/apply time. Done as `actions.applyAt`.
 - stagger seconds
 - release status
 - release message
@@ -404,6 +433,14 @@ Add per-pillar controls:
 - last node-reported version
 - last node-reported error
 
+Add per-seed-node controls:
+
+- generated enode
+- public IP and p2p port
+- bootstrap token status
+- network private key download through authenticated bootstrap only
+- delete or exclude from the active event
+
 ### Node Telemetry
 
 Add per-pillar status controls and displays:
@@ -418,6 +455,8 @@ Add per-pillar status controls and displays:
 - recent error and warning counts
 - recent log snippet
 - stale or unresponsive marker
+
+The current admin telemetry table covers pillars and managed seed nodes.
 
 ## Historical Artifact Retention
 
@@ -461,6 +500,7 @@ interface GenesisEvent {
   release: ReleaseTarget;
   pillarIds: string[];
   excludedPillarIds: string[];
+  seedNodeIds: string[];
   artifacts?: PublishedEventArtifacts;
 }
 
@@ -470,7 +510,7 @@ interface ReleaseTarget {
   goZenonCommit?: string;
   deploymentRepoUrl: string;
   deploymentRef: string;
-  notBefore?: string;
+  applyAt?: string;
   staggerSeconds: number;
   status: "waiting" | "upgrade_available" | "paused";
   message?: string;
@@ -538,7 +578,7 @@ interface PublishedEventArtifacts {
 
 ### Phase 2: Operator Bootstrap
 
-- Add per-pillar bootstrap tokens. Done for the first-pass reusable token.
+- Add node-scoped bootstrap tokens. Done for the first-pass reusable token.
 - Add authenticated bootstrap manifest endpoint. Done.
 - Add authenticated producer config/keyfile/password endpoints. Done.
 - Add generated install script. Done.

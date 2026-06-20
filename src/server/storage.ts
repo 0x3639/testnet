@@ -23,6 +23,7 @@ function defaultSettings(): NetworkSettings {
     goZenonCommit: DEFAULT_GO_ZENON_COMMIT,
     deploymentRepo: DEFAULT_DEPLOYMENT_REPO,
     deploymentRef: DEFAULT_DEPLOYMENT_REF,
+    releaseApplyAtSec: undefined,
     wipeDataOnPublish: false,
     sporkAddress: "",
     seeders: [],
@@ -35,6 +36,7 @@ function defaultState(): AppState {
     users: [],
     sessions: [],
     pillars: [],
+    seedNodes: [],
     settings: defaultSettings()
   };
 }
@@ -51,6 +53,7 @@ export async function readState(): Promise<AppState> {
     return {
       ...defaultState(),
       ...state,
+      seedNodes: state.seedNodes ?? [],
       settings: {
         ...defaultSettings(),
         ...state.settings,

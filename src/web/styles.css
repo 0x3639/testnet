@@ -270,6 +270,10 @@ textarea {
   gap: 14px;
 }
 
+.detailGrid.singleColumn {
+  grid-template-columns: 1fr;
+}
+
 .field {
   display: grid;
   gap: 7px;
@@ -286,6 +290,15 @@ textarea {
 
 .toolbar {
   margin-top: 18px;
+}
+
+.compactToolbar {
+  margin-top: 0;
+}
+
+.compactToolbar .btn {
+  min-height: 34px;
+  padding: 0 10px;
 }
 
 .panelHeader {
