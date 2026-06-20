@@ -94,17 +94,75 @@ The standalone stack contains:
 
 Use `docker-compose.portainer.yml` when an existing Caddy Docker Proxy stack already handles TLS certificates and routing. This stack runs only the app container and attaches it to the external `root_proxy-net` network.
 
-Set these Portainer stack environment variables:
+### Prerequisites
+
+Before creating the Portainer stack, confirm:
+
+- DNS for your testnet host points at the server running Caddy.
+- Your existing Caddy Docker Proxy stack is running.
+- Caddy Docker Proxy is connected to the Docker network named `root_proxy-net`.
+- The Docker network `root_proxy-net` exists before this stack starts.
+
+If the proxy network does not exist yet, create it on the Docker host:
+
+```bash
+docker network create root_proxy-net
+```
+
+If Caddy is already running from another stack, make sure that Caddy service also joins `root_proxy-net`. The testnet builder does not publish any host ports in Portainer mode; Caddy reaches it over this shared Docker network.
+
+### Create The Stack From Git
+
+The recommended Portainer setup is a Git repository stack. This lets Portainer clone the repository and use `build.context: .` from `docker-compose.portainer.yml`.
+
+In Portainer:
+
+1. Open **Stacks**.
+2. Click **Add stack**.
+3. Name the stack, for example `zenon-testnet-builder`.
+4. Select **Git Repository** as the build method.
+5. Repository URL:
+
+   ```text
+   https://github.com/0x3639/testnet.git
+   ```
+
+6. Repository reference:
+
+   ```text
+   refs/heads/main
+   ```
+
+7. Compose path:
+
+   ```text
+   docker-compose.portainer.yml
+   ```
+
+8. Add the environment variables below.
+9. Click **Deploy the stack**.
+
+Set these stack environment variables:
 
 - `APP_SECRET`: a stable secret, for example the output of `openssl rand -hex 32`.
 - `TESTNET_HOST`: the public host Caddy should route, for example `testnet.zenon.info`.
 - `TZ`: optional, defaults to `Etc/UTC`.
 
-Deploy this compose file in Portainer:
+Example values:
 
 ```text
-docker-compose.portainer.yml
+APP_SECRET=replace-with-a-long-random-secret
+TESTNET_HOST=testnet.zenon.info
+TZ=Etc/UTC
 ```
+
+You can generate `APP_SECRET` on any trusted machine:
+
+```bash
+openssl rand -hex 32
+```
+
+Keep this value somewhere safe. Do not change it after operators register pillars because it encrypts stored wallet package secrets.
 
 The Portainer stack uses these Caddy Docker Proxy labels:
 
@@ -114,17 +172,61 @@ caddy.encode: zstd gzip
 caddy.reverse_proxy: "{{upstreams 8787}}"
 ```
 
-Create the first admin account from the running app container:
+After deployment, Caddy should route:
 
-```bash
-docker compose -f docker-compose.portainer.yml exec testnet-builder node dist/server/server/cli.js create-admin --username admin
+```text
+https://<TESTNET_HOST>
+https://<TESTNET_HOST>/genesis.json
+https://<TESTNET_HOST>/config.json
 ```
 
-If you are using the Portainer UI, open the `testnet-builder` container console and run:
+The JSON files return `404` until an admin publishes them from the app.
+
+### Create The First Admin
+
+After the stack is running, create the first admin account from the `testnet-builder` container.
+
+In Portainer:
+
+1. Open **Containers**.
+2. Open the `testnet-builder` container from the stack.
+3. Open **Console**.
+4. Connect with `/bin/sh`.
+5. Run:
 
 ```bash
 node dist/server/server/cli.js create-admin --username admin
 ```
+
+The command prints the generated password once. Save it before closing the console.
+
+You can also set the initial password yourself:
+
+```bash
+node dist/server/server/cli.js create-admin --username admin --password "replace-this-password"
+```
+
+Then open:
+
+```text
+https://<TESTNET_HOST>
+```
+
+Sign in as `admin`, create operator accounts, collect pillar registrations, configure the seed node, finalize, and publish.
+
+### Updating The Stack
+
+When new commits are pushed to `main`:
+
+1. Open the stack in Portainer.
+2. Pull and redeploy the Git stack.
+3. Keep the same persistent volume and the same `APP_SECRET`.
+
+The app stores state in the named volume `zenon_testnet_builder_data` at `/app/data`.
+
+### Web Editor Alternative
+
+If you create a Portainer stack with the Web Editor instead of the Git Repository method, `build.context: .` will not have the repository files unless you provide them another way. For Web Editor deployments, build and publish an image first, then remove the `build:` block and set `image:` to your published image.
 
 ## Admin Workflow
 
