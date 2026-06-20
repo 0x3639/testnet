@@ -98,6 +98,25 @@ function formatUtc(value: string): string {
   return `${new Date(value).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
+function settingsKey(settings: PublicNetworkSettings): string {
+  return JSON.stringify({
+    chainIdentifier: settings.chainIdentifier,
+    extraData: settings.extraData,
+    expectedPillars: settings.expectedPillars,
+    minPillars: settings.minPillars,
+    genesisTimestampSec: settings.genesisTimestampSec,
+    releaseApplyAtSec: settings.releaseApplyAtSec ?? null,
+    goZenonRepo: settings.goZenonRepo,
+    goZenonRef: settings.goZenonRef,
+    goZenonCommit: settings.goZenonCommit || "",
+    deploymentRepo: settings.deploymentRepo,
+    deploymentRef: settings.deploymentRef,
+    wipeDataOnPublish: settings.wipeDataOnPublish,
+    seeders: settings.seeders.filter(Boolean),
+    sporks: settings.sporks
+  });
+}
+
 function generatePassword(length = 24): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789_-";
   const bytes = new Uint8Array(length);
@@ -740,12 +759,35 @@ function heightLag(node: TelemetryNode): string {
   return String(Math.max(0, sync.targetHeight - sync.currentHeight));
 }
 
+function clockSkewSeconds(node: TelemetryNode): number | undefined {
+  const latest = node.nodeStatus?.latest;
+  if (!latest?.reportedAt) return undefined;
+  const reportedAt = Date.parse(latest.reportedAt);
+  const receivedAt = Date.parse(latest.receivedAt);
+  if (Number.isNaN(reportedAt) || Number.isNaN(receivedAt)) return undefined;
+  return Math.round((reportedAt - receivedAt) / 1000);
+}
+
+function formatClockSkew(node: TelemetryNode): string {
+  const skew = clockSkewSeconds(node);
+  if (skew === undefined) return "-";
+  const abs = Math.abs(skew);
+  const sign = skew > 0 ? "+" : skew < 0 ? "-" : "";
+  if (abs < 60) return `${sign}${abs}s`;
+  const minutes = Math.floor(abs / 60);
+  const seconds = abs % 60;
+  return seconds ? `${sign}${minutes}m ${seconds}s` : `${sign}${minutes}m`;
+}
+
 function nodeHealth(node: TelemetryNode): { label: string; tone: "ok" | "warn" | "bad" | "muted" } {
   const latest = node.nodeStatus?.latest;
   if (!latest) return { label: "No report", tone: "muted" };
 
   const ageMs = Date.now() - Date.parse(latest.receivedAt);
   if (!Number.isNaN(ageMs) && ageMs > 5 * 60 * 1000) return { label: "Stale", tone: "bad" };
+  const skew = clockSkewSeconds(node);
+  if (skew !== undefined && Math.abs(skew) > 5 * 60) return { label: "Clock skew", tone: "bad" };
+  if (skew !== undefined && Math.abs(skew) > 60) return { label: "Clock skew", tone: "warn" };
   if (latest.node?.waitingForRelease) return { label: "Waiting", tone: "warn" };
   if (latest.node?.serviceActive === false) return { label: "Service down", tone: "bad" };
   if ((latest.logs?.errorCountLastMinute ?? 0) > 0) return { label: "Errors", tone: "bad" };
@@ -776,6 +818,7 @@ function NodeStatusPanel({ nodes, refresh }: { nodes: TelemetryNode[]; refresh: 
               <th>Type</th>
               <th>Health</th>
               <th>Last Seen</th>
+              <th>Clock</th>
               <th>Height</th>
               <th>Lag</th>
               <th>Sync</th>
@@ -798,6 +841,7 @@ function NodeStatusPanel({ nodes, refresh }: { nodes: TelemetryNode[]; refresh: 
                     <span className={`statusPill ${health.tone}`}>{health.label}</span>
                   </td>
                   <td className="mono">{formatAge(latest?.receivedAt)}</td>
+                  <td className="mono">{formatClockSkew(node)}</td>
                   <td className="mono">{latest?.sync?.currentHeight ?? "-"}</td>
                   <td className="mono">{heightLag(node)}</td>
                   <td>{syncStateLabel(latest?.sync?.state)}</td>
@@ -840,11 +884,13 @@ interface CreateSeedNodeInput {
 function SettingsForm({
   settings,
   onSave,
-  onProbeSeed
+  onProbeSeed,
+  onDirtyChange
 }: {
   settings: PublicNetworkSettings;
   onSave: (settings: PublicNetworkSettings) => Promise<void>;
   onProbeSeed: (seed: ProbeSeedInput) => Promise<{ seed: SeedNodeProbeResult; settings: PublicNetworkSettings }>;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const [draft, setDraft] = useState(settings);
   const [seedIp, setSeedIp] = useState("");
@@ -855,7 +901,14 @@ function SettingsForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => setDraft(settings), [settings]);
+  useEffect(() => {
+    setDraft(settings);
+    onDirtyChange(false);
+  }, [settings, onDirtyChange]);
+
+  useEffect(() => {
+    onDirtyChange(settingsKey(draft) !== settingsKey(settings));
+  }, [draft, settings, onDirtyChange]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -867,6 +920,7 @@ function SettingsForm({
         seeders: draft.seeders.filter(Boolean),
         sporks: draft.sporks
       });
+      onDirtyChange(false);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -1108,6 +1162,7 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
   );
   const [adminError, setAdminError] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [settingsDirty, setSettingsDirty] = useState(false);
   const [seedNodeInput, setSeedNodeInput] = useState<CreateSeedNodeInput>({
     userId: "",
     nodeName: "",
@@ -1219,11 +1274,19 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
   }
 
   async function finalize() {
+    if (settingsDirty) {
+      setAdminError("Save Settings before finalizing the genesis.");
+      return;
+    }
     await api("/api/admin/finalize", { method: "POST" });
     await refresh();
   }
 
   async function publish() {
+    if (settingsDirty) {
+      setAdminError("Save Settings before publishing a release.");
+      return;
+    }
     setPublishing(true);
     setAdminError("");
     try {
@@ -1243,6 +1306,7 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
         <h1>Genesis Control</h1>
       </section>
       <StatusGrid readiness={session.readiness} />
+      {settingsDirty ? <div className="alert wide">Settings have unsaved changes. Save Settings before Finalize or Publish Release.</div> : null}
       {adminError ? <div className="alert wide">{adminError}</div> : null}
       <UserManagement
         users={session.users}
@@ -1403,7 +1467,7 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
           </table>
         </div>
       </section>
-      <SettingsForm settings={session.settings} onSave={saveSettings} onProbeSeed={probeSeed} />
+      <SettingsForm settings={session.settings} onSave={saveSettings} onProbeSeed={probeSeed} onDirtyChange={setSettingsDirty} />
       <section className="panel jsonPanel">
         <div className="panelHeader">
           <div className="tabs">
@@ -1421,10 +1485,10 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
             <Button variant="secondary" icon={<FileJson size={18} />} onClick={() => download("/api/admin/config-template.json")}>
               Config
             </Button>
-            <Button icon={<CheckCircle2 size={18} />} onClick={finalize}>
+            <Button icon={<CheckCircle2 size={18} />} onClick={finalize} disabled={settingsDirty}>
               Finalize
             </Button>
-            <Button icon={<Server size={18} />} onClick={publish} disabled={publishing}>
+            <Button icon={<Server size={18} />} onClick={publish} disabled={publishing || settingsDirty}>
               {publishing ? "Publishing" : "Publish Release"}
             </Button>
           </div>
@@ -1441,9 +1505,13 @@ export function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
+  async function loadCurrentSession(role?: Role): Promise<Session> {
+    if (role === "admin") return api<AdminOverview>("/api/admin/overview");
+    return api<UserOverview>("/api/me");
+  }
+
   async function refresh() {
-    const current = session?.user.role === "admin" ? await api<AdminOverview>("/api/admin/overview") : await api<UserOverview>("/api/me");
-    setSession(current);
+    setSession(await loadCurrentSession(session?.user.role));
   }
 
   useEffect(() => {
@@ -1458,6 +1526,17 @@ export function App() {
       .catch(() => setSession(null))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!session) return undefined;
+    const role = session.user.role;
+    const interval = window.setInterval(() => {
+      void loadCurrentSession(role)
+        .then(setSession)
+        .catch(() => undefined);
+    }, 30000);
+    return () => window.clearInterval(interval);
+  }, [session?.user.id, session?.user.role]);
 
   async function logout() {
     await api("/api/auth/logout", { method: "POST" });
