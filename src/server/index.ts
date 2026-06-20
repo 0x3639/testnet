@@ -113,6 +113,13 @@ const adminSeedNodeCreateSchema = z.object({
 });
 
 const optionalShortText = z.string().trim().max(256).optional();
+const optionalNullableText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .nullish()
+    .transform((value) => value ?? undefined);
 
 const nodeStatusReportSchema = z.object({
   eventId: z.string().trim().max(120).optional(),
@@ -139,15 +146,15 @@ const nodeStatusReportSchema = z.object({
   network: z
     .object({
       peerCount: z.number().int().min(0).max(10000).optional(),
-      selfPublicKey: z.string().trim().max(256).optional(),
-      selfIp: z.string().trim().max(128).optional(),
+      selfPublicKey: optionalNullableText(256),
+      selfIp: optionalNullableText(128),
       peers: z
         .array(
           z.object({
-            publicKey: z.string().trim().max(256).optional(),
-            ip: z.string().trim().max(128).optional(),
-            name: z.string().trim().max(128).optional(),
-            version: z.string().trim().max(128).optional()
+            publicKey: optionalNullableText(256),
+            ip: optionalNullableText(128),
+            name: optionalNullableText(128),
+            version: optionalNullableText(128)
           })
         )
         .max(100)
@@ -571,6 +578,17 @@ cat > /usr/local/bin/znn-testnet-agent <<'AGENT'
 #!/usr/bin/env bash
 set -euo pipefail
 
+ENV_FILE="\${ZNN_AGENT_ENV_FILE:-/etc/cron.d/znn-testnet-agent}"
+if [[ -z "\${ZNN_BOOTSTRAP_TOKEN:-}" && -r "$ENV_FILE" ]]; then
+  while IFS='=' read -r key value; do
+    case "$key" in
+      ZNN_BOOTSTRAP_TOKEN|ZNN_TESTNET_URL|ZNN_DIR|ZNN_DEPLOYMENT_DIR|ZNN_RPC_URL|ZNN_SERVICE_NAME|ZNN_AGENT_STATE_DIR)
+        [[ -n "$value" ]] && export "$key=$value"
+        ;;
+    esac
+  done < <(grep -E '^(ZNN_BOOTSTRAP_TOKEN|ZNN_TESTNET_URL|ZNN_DIR|ZNN_DEPLOYMENT_DIR|ZNN_RPC_URL|ZNN_SERVICE_NAME|ZNN_AGENT_STATE_DIR)=' "$ENV_FILE" || true)
+fi
+
 : "\${ZNN_BOOTSTRAP_TOKEN:?Missing ZNN_BOOTSTRAP_TOKEN.}"
 
 BASE_URL="\${ZNN_TESTNET_URL:-${origin}}"
@@ -791,17 +809,19 @@ report_status() {
         currentHeight: $sync.currentHeight,
         targetHeight: $sync.targetHeight
       },
-      network: {
-        peerCount: (($network.peers // []) | length),
-        selfPublicKey: $network.self.publicKey,
-        selfIp: $network.self.ip,
-        peers: (($network.peers // []) | map({
-          publicKey: .publicKey,
-          ip: .ip,
-          name: .name,
-          version: .version
-        }) | .[0:20])
-      },
+      network: ({
+        peerCount: (($network.peers // []) | length)
+      } + (if ($network.self.publicKey // null) == null then {} else { selfPublicKey: $network.self.publicKey } end)
+        + (if ($network.self.ip // null) == null then {} else { selfIp: $network.self.ip } end)
+        + {
+          peers: (($network.peers // []) | map(
+            {}
+            + (if (.publicKey // null) == null then {} else { publicKey: .publicKey } end)
+            + (if (.ip // null) == null then {} else { ip: .ip } end)
+            + (if (.name // null) == null then {} else { name: .name } end)
+            + (if (.version // null) == null then {} else { version: .version } end)
+          ) | .[0:20])
+        }),
       logs: {
         errorCountLastMinute: $errors,
         warningCountLastMinute: $warnings,
