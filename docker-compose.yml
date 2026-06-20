@@ -1,0 +1,27 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      APP_SECRET: ${APP_SECRET:?Set APP_SECRET before starting the stack}
+      DATA_DIR: /app/data
+      PORT: 8787
+    volumes:
+      - testnet-data:/app/data
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  testnet-data:
+  caddy-data:
+  caddy-config:
