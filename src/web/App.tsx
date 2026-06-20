@@ -679,11 +679,11 @@ function PublishedArtifacts({ published }: { published: PublishedArtifactsInfo }
   return (
     <div className="publishedBlock">
       <div className="publishedHeader">
-        <div>
+        <div className="publishedStamp">
           <span className="ledger">Published</span>
           <strong>{new Date(published.publishedAt).toLocaleString()}</strong>
         </div>
-        <div className="toolbar">
+        <div className="publishedMeta">
           <span className="mono mutedText">chain {published.chainIdentifier}</span>
           <span className="mono mutedText">{published.seeders.length} seeder{published.seeders.length === 1 ? "" : "s"}</span>
           {published.genesisStartAt ? <span className="mono mutedText">genesis {formatUtc(published.genesisStartAt)}</span> : null}

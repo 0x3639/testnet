@@ -617,7 +617,31 @@ th {
 }
 
 .publishedHeader {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.publishedStamp {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.publishedStamp strong {
+  overflow-wrap: anywhere;
+}
+
+.publishedMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  min-width: 0;
+}
+
+.publishedMeta .mono,
+.publishedMeta .statusPill {
+  white-space: nowrap;
 }
 
 .publishedRows {
