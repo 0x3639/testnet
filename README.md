@@ -72,7 +72,7 @@ npm run account -- create-user --username pillar-a --password "change-me"
 
 ## Release Target Configuration
 
-The node bootstrap script reads its install target from the app environment. Defaults point at the upstream Zenon node and the deployment helper requested for this project:
+The node bootstrap script reads its active install target from the admin settings. Fresh installs use these environment variables as defaults:
 
 ```text
 GO_ZENON_REPO=https://github.com/zenon-network/go-zenon.git
@@ -81,7 +81,7 @@ DEPLOYMENT_REPO=https://github.com/hypercore-one/deployment.git
 DEPLOYMENT_REF=main
 ```
 
-Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`. The optional `GO_ZENON_COMMIT` environment variable is reported in the bootstrap manifest and node status table when you want the control panel to display a pinned commit, but the current deployment helper installs by ref.
+After the app is running, admins can edit the go-zenon repo/ref, optional commit label, deployment repo, and deployment ref from the Settings panel. These values drive both `/node-plan.json` and authenticated bootstrap manifests. Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`.
 
 ## Standalone Docker
 
@@ -166,10 +166,10 @@ Set these stack environment variables:
 - `APP_SECRET`: a stable secret, for example the output of `openssl rand -hex 32`.
 - `TESTNET_HOST`: the public host Caddy should route, for example `testnet.zenon.info`.
 - `TZ`: optional, defaults to `Etc/UTC`.
-- `GO_ZENON_REPO`: optional, defaults to `https://github.com/zenon-network/go-zenon.git`.
-- `GO_ZENON_REF`: optional, defaults to `master`.
-- `DEPLOYMENT_REPO`: optional, defaults to `https://github.com/hypercore-one/deployment.git`.
-- `DEPLOYMENT_REF`: optional, defaults to `main`.
+- `GO_ZENON_REPO`: optional initial default, defaults to `https://github.com/zenon-network/go-zenon.git`.
+- `GO_ZENON_REF`: optional initial default, defaults to `master`.
+- `DEPLOYMENT_REPO`: optional initial default, defaults to `https://github.com/hypercore-one/deployment.git`.
+- `DEPLOYMENT_REF`: optional initial default, defaults to `main`.
 
 Example values:
 
@@ -257,10 +257,11 @@ If you create a Portainer stack with the Web Editor instead of the Git Repositor
 2. Create one operator login per expected pillar.
 3. Send each operator the copied login URL, username, and password.
 4. Ask each operator to sign in, choose a pillar name, and either download their pillar package or copy the bootstrap command.
-5. Add or probe the seed node in the admin panel so `Net.Seeders` contains the seed node enode.
-6. Review the generated `genesis.json` and `config.json`.
-7. Finalize the genesis when registrations are complete.
-8. Publish the files so operators can fetch them without authentication.
+5. Set the go-zenon and deployment repo/ref release target in Settings.
+6. Add or probe the seed node in the admin panel so `Net.Seeders` contains the seed node enode.
+7. Review the generated `genesis.json` and `config.json`.
+8. Finalize the genesis when registrations are complete.
+9. Publish the files so operators can fetch them without authentication.
 
 Admins can also reset user passwords, delete users, delete pillar registrations, and download the spork wallet package.
 

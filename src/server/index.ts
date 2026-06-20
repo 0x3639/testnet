@@ -17,11 +17,6 @@ const PUBLIC_GENESIS_PATH = "/genesis.json";
 const PUBLIC_CONFIG_PATH = "/config.json";
 const PUBLIC_NODE_PLAN_PATH = "/node-plan.json";
 const NODE_STATUS_HISTORY_LIMIT = 24 * 60;
-const DEFAULT_GO_ZENON_REPO = process.env.GO_ZENON_REPO ?? "https://github.com/zenon-network/go-zenon.git";
-const DEFAULT_GO_ZENON_REF = process.env.GO_ZENON_REF ?? "master";
-const DEFAULT_GO_ZENON_COMMIT = process.env.GO_ZENON_COMMIT;
-const DEFAULT_DEPLOYMENT_REPO = process.env.DEPLOYMENT_REPO ?? "https://github.com/hypercore-one/deployment.git";
-const DEFAULT_DEPLOYMENT_REF = process.env.DEPLOYMENT_REF ?? "main";
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -62,6 +57,11 @@ const settingsSchema = z.object({
   expectedPillars: z.number().int().min(1).max(100),
   minPillars: z.number().int().min(1).max(100),
   genesisTimestampSec: z.number().int().positive(),
+  goZenonRepo: z.string().trim().min(1).max(300),
+  goZenonRef: z.string().trim().min(1).max(160),
+  goZenonCommit: z.string().trim().max(80).optional(),
+  deploymentRepo: z.string().trim().min(1).max(300),
+  deploymentRef: z.string().trim().min(1).max(160),
   seeders: z.array(z.string().trim().min(1)).max(100),
   sporks: z.array(
     z.object({
@@ -234,6 +234,18 @@ function publishedInfo(published?: PublishedArtifacts): PublishedArtifactsInfo |
   };
 }
 
+function genesisSettingsKey(settings: NetworkSettings): string {
+  return JSON.stringify({
+    chainIdentifier: settings.chainIdentifier,
+    extraData: settings.extraData,
+    expectedPillars: settings.expectedPillars,
+    minPillars: settings.minPillars,
+    genesisTimestampSec: settings.genesisTimestampSec,
+    seeders: settings.seeders,
+    sporks: settings.sporks
+  });
+}
+
 function requestOrigin(request: express.Request): string {
   const forwardedProto = request.get("x-forwarded-proto")?.split(",")[0]?.trim();
   const forwardedHost = request.get("x-forwarded-host")?.split(",")[0]?.trim();
@@ -266,16 +278,16 @@ function pillarConfigForDeployment(settings: NetworkSettings, pillar: PillarReco
   });
 }
 
-function releaseTarget() {
+function releaseTarget(settings: NetworkSettings) {
   return {
     goZenon: {
-      repoUrl: DEFAULT_GO_ZENON_REPO,
-      ref: DEFAULT_GO_ZENON_REF,
-      commit: DEFAULT_GO_ZENON_COMMIT
+      repoUrl: settings.goZenonRepo,
+      ref: settings.goZenonRef,
+      commit: settings.goZenonCommit || undefined
     },
     deployment: {
-      repoUrl: DEFAULT_DEPLOYMENT_REPO,
-      ref: DEFAULT_DEPLOYMENT_REF
+      repoUrl: settings.deploymentRepo,
+      ref: settings.deploymentRef
     }
   };
 }
@@ -286,7 +298,7 @@ function nodePlan(state: AppState) {
     eventId: state.publishedArtifacts?.publishedAt ?? state.finalizedGenesis?.finalizedAt ?? "draft",
     publishedAt: state.publishedArtifacts?.publishedAt,
     finalizedAt: state.finalizedGenesis?.finalizedAt,
-    ...releaseTarget()
+    ...releaseTarget(state.settings)
   };
 }
 
@@ -305,7 +317,7 @@ function bootstrapManifest(request: express.Request, state: AppState, pillar: Pi
     producerPasswordUrl: `${origin}/api/bootstrap/producer-password.txt`,
     nodePlanUrl: `${origin}${PUBLIC_NODE_PLAN_PATH}`,
     statusUrl: `${origin}/api/bootstrap/status`,
-    ...releaseTarget()
+    ...releaseTarget(state.settings)
   };
 }
 
@@ -708,12 +720,16 @@ async function main() {
     }
 
     const settings = await updateState((state) => {
+      const beforeGenesisSettings = genesisSettingsKey(state.settings);
       state.settings = {
         ...state.settings,
         ...parsed.data,
-        minPillars: Math.min(parsed.data.minPillars, parsed.data.expectedPillars)
+        minPillars: Math.min(parsed.data.minPillars, parsed.data.expectedPillars),
+        goZenonCommit: parsed.data.goZenonCommit || undefined
       };
-      state.finalizedGenesis = undefined;
+      if (genesisSettingsKey(state.settings) !== beforeGenesisSettings) {
+        state.finalizedGenesis = undefined;
+      }
       return publicSettings(state.settings);
     });
     response.json({ settings });

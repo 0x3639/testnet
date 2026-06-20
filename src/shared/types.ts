@@ -50,6 +50,11 @@ export interface NetworkSettings {
   expectedPillars: number;
   minPillars: number;
   genesisTimestampSec: number;
+  goZenonRepo: string;
+  goZenonRef: string;
+  goZenonCommit?: string;
+  deploymentRepo: string;
+  deploymentRef: string;
   sporkAddress: string;
   sporkWallet?: StoredWallet;
   seeders: string[];

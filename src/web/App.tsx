@@ -793,6 +793,57 @@ function SettingsForm({
       <div className="seedProbe">
         <div className="panelHeader">
           <div>
+            <span className="ledger">Release Target</span>
+            <h2>Node Deployment</h2>
+          </div>
+        </div>
+        <div className="formGrid">
+          <label>
+            <span>go-zenon Repo</span>
+            <input
+              className="mono"
+              value={draft.goZenonRepo}
+              onChange={(event) => setDraft({ ...draft, goZenonRepo: event.target.value })}
+            />
+          </label>
+          <label>
+            <span>go-zenon Ref</span>
+            <input
+              className="mono"
+              value={draft.goZenonRef}
+              onChange={(event) => setDraft({ ...draft, goZenonRef: event.target.value })}
+            />
+          </label>
+          <label>
+            <span>go-zenon Commit</span>
+            <input
+              className="mono"
+              value={draft.goZenonCommit ?? ""}
+              onChange={(event) => setDraft({ ...draft, goZenonCommit: event.target.value })}
+              placeholder="optional"
+            />
+          </label>
+          <label>
+            <span>Deployment Ref</span>
+            <input
+              className="mono"
+              value={draft.deploymentRef}
+              onChange={(event) => setDraft({ ...draft, deploymentRef: event.target.value })}
+            />
+          </label>
+        </div>
+        <label>
+          <span>Deployment Repo</span>
+          <input
+            className="mono"
+            value={draft.deploymentRepo}
+            onChange={(event) => setDraft({ ...draft, deploymentRepo: event.target.value })}
+          />
+        </label>
+      </div>
+      <div className="seedProbe">
+        <div className="panelHeader">
+          <div>
             <span className="ledger">Seed Node</span>
             <h2>Seeder Discovery</h2>
           </div>
@@ -867,6 +918,11 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
         expectedPillars: settings.expectedPillars,
         minPillars: settings.minPillars,
         genesisTimestampSec: settings.genesisTimestampSec,
+        goZenonRepo: settings.goZenonRepo,
+        goZenonRef: settings.goZenonRef,
+        goZenonCommit: settings.goZenonCommit,
+        deploymentRepo: settings.deploymentRepo,
+        deploymentRef: settings.deploymentRef,
         seeders: settings.seeders,
         sporks: settings.sporks
       })

@@ -370,11 +370,11 @@ Add a Genesis Events admin area:
 
 Add per-event release fields:
 
-- go-zenon repo URL
-- go-zenon ref
-- optional pinned commit SHA
-- deployment repo URL
-- deployment ref
+- go-zenon repo URL. Done as a persisted admin setting.
+- go-zenon ref. Done as a persisted admin setting.
+- optional pinned commit SHA. Done as an optional admin setting for display/reporting.
+- deployment repo URL. Done as a persisted admin setting.
+- deployment ref. Done as a persisted admin setting.
 - not-before time
 - stagger seconds
 - release status
