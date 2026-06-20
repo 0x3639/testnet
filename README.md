@@ -356,6 +356,10 @@ curl -fsS -X POST "https://<TESTNET_HOST>/api/bootstrap/status" \
       "peerCount": 4,
       "selfPublicKey": "..."
     },
+    "process": {
+      "version": "v0.0.8",
+      "commit": "9cde165877a1e4ff47d0df6cf8b8a65b121d550c"
+    },
     "logs": {
       "errorCountLastMinute": 0,
       "warningCountLastMinute": 0,
@@ -364,7 +368,7 @@ curl -fsS -X POST "https://<TESTNET_HOST>/api/bootstrap/status" \
   }'
 ```
 
-The admin panel shows the latest report for each pillar and managed seed node, including last seen time, service status, sync height, height lag, peer count, installed ref, and recent log error counts. The server keeps a rolling 24-hour minute-sample history per node and the latest full report.
+The installed agent collects `stats.syncInfo`, `stats.networkInfo`, and `stats.processInfo` from the local node RPC. The admin panel shows the latest report for each pillar and managed seed node, including last seen time, service status, sync height, height lag, peer count, running process version, running process commit, installed ref, and recent log error counts. The server keeps a rolling 24-hour minute-sample history per node and the latest full report.
 
 ## Published Files
 

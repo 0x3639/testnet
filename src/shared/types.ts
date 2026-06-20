@@ -197,6 +197,11 @@ export interface NodePeerSummary {
   version?: string;
 }
 
+export interface NodeProcessInfo {
+  version?: string;
+  commit?: string;
+}
+
 export interface NodeStatusReport {
   eventId?: string;
   reportedAt?: string;
@@ -223,6 +228,7 @@ export interface NodeStatusReport {
     selfIp?: string;
     peers?: NodePeerSummary[];
   };
+  process?: NodeProcessInfo;
   logs?: {
     errorCountLastMinute?: number;
     warningCountLastMinute?: number;

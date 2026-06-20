@@ -94,6 +94,10 @@ curl -fsS -X POST "$BASE_URL/api/bootstrap/status" \\
     "network": {
       "peerCount": 0
     },
+    "process": {
+      "version": "v0.0.8",
+      "commit": "9cde165877a1e4ff47d0df6cf8b8a65b121d550c"
+    },
     "logs": {
       "errorCountLastMinute": 0,
       "warningCountLastMinute": 0,

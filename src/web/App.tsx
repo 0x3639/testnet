@@ -779,6 +779,11 @@ function formatClockSkew(node: TelemetryNode): string {
   return seconds ? `${sign}${minutes}m ${seconds}s` : `${sign}${minutes}m`;
 }
 
+function shortCommit(value?: string): string {
+  if (!value) return "-";
+  return value.length > 12 ? `${value.slice(0, 12)}...` : value;
+}
+
 function nodeHealth(node: TelemetryNode): { label: string; tone: "ok" | "warn" | "bad" | "muted" } {
   const latest = node.nodeStatus?.latest;
   if (!latest) return { label: "No report", tone: "muted" };
@@ -824,6 +829,7 @@ function NodeStatusPanel({ nodes, refresh }: { nodes: TelemetryNode[]; refresh: 
               <th>Sync</th>
               <th>Peers</th>
               <th>Version</th>
+              <th>Commit</th>
               <th>Service</th>
               <th>Logs</th>
             </tr>
@@ -833,6 +839,7 @@ function NodeStatusPanel({ nodes, refresh }: { nodes: TelemetryNode[]; refresh: 
               const latest = node.nodeStatus?.latest;
               const health = nodeHealth(node);
               const recentLogs = latest?.logs?.recent?.join(" | ") ?? "";
+              const processCommit = latest?.process?.commit || latest?.node?.installedCommit;
               return (
                 <tr key={node.id}>
                   <td>{node.name}</td>
@@ -846,7 +853,10 @@ function NodeStatusPanel({ nodes, refresh }: { nodes: TelemetryNode[]; refresh: 
                   <td className="mono">{heightLag(node)}</td>
                   <td>{syncStateLabel(latest?.sync?.state)}</td>
                   <td className="mono">{latest?.network?.peerCount ?? "-"}</td>
-                  <td className="mono">{latest?.node?.waitingForRelease ? "waiting" : latest?.node?.installedRef ?? "-"}</td>
+                  <td className="mono">{latest?.node?.waitingForRelease ? "waiting" : latest?.process?.version ?? latest?.node?.installedRef ?? "-"}</td>
+                  <td className="mono" title={processCommit || undefined}>
+                    {shortCommit(processCommit)}
+                  </td>
                   <td>{latest?.node?.waitingForRelease ? "waiting" : latest?.node?.serviceActive === undefined ? "-" : latest.node.serviceActive ? "active" : "down"}</td>
                   <td>
                     <span className="mono">

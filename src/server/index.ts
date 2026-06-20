@@ -161,6 +161,12 @@ const nodeStatusReportSchema = z.object({
         .optional()
     })
     .optional(),
+  process: z
+    .object({
+      version: optionalNullableText(128),
+      commit: optionalNullableText(128)
+    })
+    .optional(),
   logs: z
     .object({
       errorCountLastMinute: z.number().int().min(0).max(10000).optional(),
@@ -753,7 +759,7 @@ install_release() {
 report_status() {
   local manifest="\${1:-}"
   local waiting="\${2:-false}"
-  local event_id go_repo go_ref go_commit sync_json network_json service_active logs error_count warn_count recent_json payload
+  local event_id go_repo go_ref go_commit sync_json network_json process_json service_active logs error_count warn_count recent_json payload
 
   if [[ -n "$manifest" ]]; then
     event_id="$(printf '%s' "$manifest" | jq -r '.eventId')"
@@ -769,6 +775,7 @@ report_status() {
 
   sync_json="$(rpc stats.syncInfo || echo '{}')"
   network_json="$(rpc stats.networkInfo || echo '{}')"
+  process_json="$(rpc stats.processInfo || echo '{}')"
   service_active=false
   if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$SERVICE_NAME"; then
     service_active=true
@@ -790,6 +797,7 @@ report_status() {
     --argjson waiting "$waiting" \\
     --argjson sync "$sync_json" \\
     --argjson network "$network_json" \\
+    --argjson process "$process_json" \\
     --argjson errors "$error_count" \\
     --argjson warnings "$warn_count" \\
     --argjson recent "$recent_json" \\
@@ -822,6 +830,9 @@ report_status() {
             + (if (.version // null) == null then {} else { version: .version } end)
           ) | .[0:20])
         }),
+      process: ({
+      } + (if ($process.version // null) == null then {} else { version: $process.version } end)
+        + (if ($process.commit // null) == null then {} else { commit: $process.commit } end)),
       logs: {
         errorCountLastMinute: $errors,
         warningCountLastMinute: $warnings,
