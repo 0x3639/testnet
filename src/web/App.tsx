@@ -834,6 +834,13 @@ interface ProbeSeedInput {
   p2pPort: number;
 }
 
+interface CreateSeedNodeInput {
+  userId: string;
+  nodeName: string;
+  publicIp: string;
+  p2pPort: number;
+}
+
 function SettingsForm({
   settings,
   onSave,
@@ -1019,13 +1026,13 @@ function SettingsForm({
       <div className="seedProbe">
         <div className="panelHeader">
           <div>
-            <span className="ledger">Seed Node</span>
-            <h2>Seeder Discovery</h2>
+            <span className="ledger">External Seeder</span>
+            <h2>RPC Probe</h2>
           </div>
         </div>
         <div className="seedProbeGrid">
           <label>
-            <span>Seed IP</span>
+            <span>Seeder IP</span>
             <input className="mono" value={seedIp} onChange={(event) => setSeedIp(event.target.value)} placeholder="203.0.113.10" />
           </label>
           <label>
@@ -1053,7 +1060,7 @@ function SettingsForm({
         </div>
         <div className="toolbar">
           <Button variant="secondary" icon={<Search size={18} />} onClick={probeSeed} disabled={probing}>
-            {probing ? "Probing" : "Probe Seed"}
+            {probing ? "Probing" : "Probe External Seed"}
           </Button>
         </div>
         {seedResult ? (
@@ -1098,8 +1105,22 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
     ],
     [session.pillars, session.seedNodes]
   );
+  const userById = useMemo(() => new Map(session.users.map((user) => [user.id, user])), [session.users]);
+  const availableSeedNodeUsers = useMemo(
+    () => session.users.filter((user) => user.role === "user" && !user.nodeName),
+    [session.users]
+  );
   const [adminError, setAdminError] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [seedNodeInput, setSeedNodeInput] = useState<CreateSeedNodeInput>({
+    userId: "",
+    nodeName: "",
+    publicIp: "",
+    p2pPort: 35995
+  });
+  const [seedNodeBusy, setSeedNodeBusy] = useState(false);
+  const [seedNodeError, setSeedNodeError] = useState("");
+  const [generatedSeedEnode, setGeneratedSeedEnode] = useState("");
 
   async function saveSettings(settings: PublicNetworkSettings) {
     await api("/api/admin/settings", {
@@ -1162,6 +1183,31 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
       await refresh();
     } catch (err) {
       setAdminError((err as Error).message);
+    }
+  }
+
+  async function createManagedSeedNode(event: FormEvent) {
+    event.preventDefault();
+    setSeedNodeBusy(true);
+    setSeedNodeError("");
+    setGeneratedSeedEnode("");
+    try {
+      const result = await api<{ seedNode: PublicSeedNode; settings: PublicNetworkSettings }>("/api/admin/seed-nodes", {
+        method: "POST",
+        body: JSON.stringify(seedNodeInput)
+      });
+      setGeneratedSeedEnode(result.seedNode.enode);
+      setSeedNodeInput({
+        userId: "",
+        nodeName: "",
+        publicIp: "",
+        p2pPort: 35995
+      });
+      await refresh();
+    } catch (err) {
+      setSeedNodeError((err as Error).message);
+    } finally {
+      setSeedNodeBusy(false);
     }
   }
 
@@ -1272,11 +1318,62 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
             Refresh
           </Button>
         </div>
+        <form className="seedCreateGrid" onSubmit={createManagedSeedNode}>
+          <label>
+            <span>Operator Login</span>
+            <select
+              value={seedNodeInput.userId}
+              onChange={(event) => setSeedNodeInput({ ...seedNodeInput, userId: event.target.value })}
+              disabled={!availableSeedNodeUsers.length}
+            >
+              <option value="">{availableSeedNodeUsers.length ? "Select user" : "No unused operator users"}</option>
+              {availableSeedNodeUsers.map((user) => (
+                <option value={user.id} key={user.id}>
+                  {user.username}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Seed Node Name</span>
+            <input value={seedNodeInput.nodeName} onChange={(event) => setSeedNodeInput({ ...seedNodeInput, nodeName: event.target.value })} />
+          </label>
+          <label>
+            <span>Public IP</span>
+            <input
+              className="mono"
+              value={seedNodeInput.publicIp}
+              onChange={(event) => setSeedNodeInput({ ...seedNodeInput, publicIp: event.target.value })}
+              placeholder="203.0.113.10"
+            />
+          </label>
+          <label>
+            <span>P2P Port</span>
+            <input
+              className="mono"
+              type="number"
+              min={1}
+              max={65535}
+              value={seedNodeInput.p2pPort}
+              onChange={(event) => setSeedNodeInput({ ...seedNodeInput, p2pPort: Number(event.target.value) })}
+            />
+          </label>
+          <Button type="submit" icon={<Server size={18} />} disabled={seedNodeBusy || !availableSeedNodeUsers.length}>
+            {seedNodeBusy ? "Generating" : "Generate Enode"}
+          </Button>
+        </form>
+        {seedNodeError ? <div className="alert">{seedNodeError}</div> : null}
+        {generatedSeedEnode ? (
+          <button className="seedResult mono" type="button" onClick={() => copy(generatedSeedEnode)} title="Copy generated enode">
+            {generatedSeedEnode}
+          </button>
+        ) : null}
         <div className="tableWrap">
           <table>
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Operator</th>
                 <th>IP</th>
                 <th>P2P</th>
                 <th>Public Key</th>
@@ -1289,6 +1386,7 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
               {session.seedNodes.map((seedNode) => (
                 <tr key={seedNode.id}>
                   <td>{seedNode.nodeName}</td>
+                  <td>{userById.get(seedNode.userId)?.username ?? <span className="mutedText">Unknown</span>}</td>
                   <td className="mono">{seedNode.publicIp}</td>
                   <td className="mono">{seedNode.p2pPort}</td>
                   <td>

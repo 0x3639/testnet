@@ -105,6 +105,13 @@ const seedNodeProbeSchema = z.object({
   p2pPort: z.number().int().min(1).max(65535).default(35995)
 });
 
+const adminSeedNodeCreateSchema = z.object({
+  userId: z.string().min(1),
+  nodeName: nodeNameSchema,
+  publicIp: z.string().trim().refine(validateSeedNodeIp, "Seed node public IP must be an IP address"),
+  p2pPort: z.number().int().min(1).max(65535).default(35995)
+});
+
 const optionalShortText = z.string().trim().max(256).optional();
 
 const nodeStatusReportSchema = z.object({
@@ -167,6 +174,7 @@ function publicSettings(settings: NetworkSettings): PublicNetworkSettings {
 function publicSeedNode(record: SeedNodeRecord) {
   return {
     id: record.id,
+    userId: record.userId,
     nodeName: record.nodeName,
     publicIp: record.publicIp,
     p2pPort: record.p2pPort,
@@ -291,6 +299,13 @@ async function createSeedNode(userId: string, nodeName: string, publicIp: string
   const enode = `enode://${publicKey}@${publicIp}:${p2pPort}`;
 
   return updateState((state) => {
+    const user = state.users.find((candidate) => candidate.id === userId);
+    if (!user) {
+      throw new Error("User not found");
+    }
+    if (user.role !== "user") {
+      throw new Error("Seed nodes must be assigned to an operator user");
+    }
     if (state.pillars.some((pillar) => pillar.userId === userId)) {
       throw new Error("This account already has a pillar registration");
     }
@@ -1254,6 +1269,26 @@ async function main() {
       response.json({ seedNode });
     } catch (error: unknown) {
       response.status(404).json({ error: (error as Error).message });
+    }
+  });
+
+  app.post("/api/admin/seed-nodes", requireAuth("admin"), async (request, response) => {
+    const parsed = adminSeedNodeCreateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid seed node" });
+      return;
+    }
+
+    try {
+      const seedNode = await createSeedNode(parsed.data.userId, parsed.data.nodeName, parsed.data.publicIp, parsed.data.p2pPort);
+      const state = await readState();
+      response.status(201).json({
+        seedNode: publicSeedNode(seedNode),
+        settings: publicSettings(state.settings),
+        user: managedUsers(state).find((candidate) => candidate.id === parsed.data.userId)
+      });
+    } catch (error: unknown) {
+      response.status(409).json({ error: (error as Error).message });
     }
   });
 

@@ -73,6 +73,7 @@ Seed nodes should:
 
 - receive a node-specific bootstrap token
 - receive a seed-node package with `network-private-key`, config, and status token
+- be creatable by an admin from an unused operator login, node name, public IP, and p2p port without querying RPC
 - be shown in admin telemetry
 - be removable from the current event and draft seeder list
 - never receive pillar, reward, or producer wallet allocations
@@ -437,6 +438,7 @@ Add per-seed-node controls:
 
 - generated enode
 - public IP and p2p port
+- admin create form that generates `network-private-key` and enode before the seed node is booted
 - bootstrap token status
 - network private key download through authenticated bootstrap only
 - delete or exclude from the active event

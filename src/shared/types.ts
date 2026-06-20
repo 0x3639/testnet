@@ -125,6 +125,7 @@ export interface PublicPillar {
 
 export interface PublicSeedNode {
   id: string;
+  userId: string;
   nodeName: string;
   publicIp: string;
   p2pPort: number;

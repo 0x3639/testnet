@@ -454,6 +454,14 @@ textarea {
   margin-bottom: 14px;
 }
 
+.seedCreateGrid {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) minmax(160px, 1fr) 112px auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
 .passwordEntry {
   display: grid;
   grid-template-columns: minmax(160px, 1fr) auto;
@@ -688,7 +696,8 @@ pre {
   .pageGrid,
   .adminLayout,
   .statusGrid,
-  .userCreateGrid {
+  .userCreateGrid,
+  .seedCreateGrid {
     grid-template-columns: 1fr;
   }
 }
