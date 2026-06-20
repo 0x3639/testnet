@@ -193,17 +193,19 @@ The implemented first-pass script:
 
 1. Require root.
 2. Install basic dependencies if missing.
-3. Download the authenticated bootstrap manifest.
-4. Clone `hypercore-one/deployment`.
-5. Run the deployment script to build and install go-zenon.
-6. Stop `go-zenon`.
-7. Create `/root/.znn` and `/root/.znn/wallet`.
-8. Download `genesis.json`.
-9. Download the pillar-specific `config.json`.
-10. Download the producer keyfile and password.
-11. Write files with strict permissions.
-12. Install a one-minute cron job for status reporting.
-13. Restart `go-zenon` and send an initial status report.
+3. Install `/usr/local/bin/znn-testnet-agent`.
+4. Install a one-minute cron job.
+5. Report `Waiting` when no release has been published.
+6. Poll the authenticated bootstrap manifest until **Publish Release** is clicked.
+7. Clone `hypercore-one/deployment`.
+8. Run the deployment script to build and install go-zenon.
+9. Stop `go-zenon`.
+10. Create `/root/.znn` and `/root/.znn/wallet`.
+11. Download `genesis.json`.
+12. Download the pillar-specific `config.json`.
+13. Download the producer keyfile and password.
+14. Write files with strict permissions.
+15. Restart `go-zenon` and send a status report.
 
 The deployment repo already supports non-interactive deployment:
 
@@ -538,9 +540,9 @@ interface PublishedEventArtifacts {
 
 - Add node-side status script. Done.
 - Install cron or systemd timer. Done with cron.
-- Download artifacts and call `hypercore-one/deployment`. Done for initial bootstrap.
-- Store local state to avoid repeated upgrades. Pending.
-- Add release-plan polling and idempotent upgrades. Pending.
+- Download artifacts and call `hypercore-one/deployment`. Done after Publish Release.
+- Store local state to avoid repeated upgrades. Done for published event/target keys.
+- Add release polling and idempotent upgrades. Done for authenticated manifest polling.
 - Report status back to the control panel. Done.
 - Collect `stats.syncInfo`, `stats.networkInfo`, local service state, and capped recent log errors. Done.
 

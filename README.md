@@ -289,18 +289,24 @@ curl -fsSL "https://<TESTNET_HOST>/api/bootstrap/install.sh" | sudo env ZNN_BOOT
 
 Run it on the node host. The script is intended for the same Linux/systemd style environment supported by `hypercore-one/deployment`.
 
-The bootstrap flow:
+The bootstrap flow before a release is published:
 
 1. Installs basic dependencies.
-2. Downloads the authenticated bootstrap manifest with the pillar token.
-3. Clones `DEPLOYMENT_REPO` at `DEPLOYMENT_REF`.
-4. Runs `./zenon.sh --deploy zenon "$GO_ZENON_REPO" "$GO_ZENON_REF"` to build and install go-zenon.
-5. Stops `go-zenon`.
-6. Writes `/root/.znn/genesis.json`.
-7. Writes the pillar-specific `/root/.znn/config.json`.
-8. Writes `/root/.znn/wallet/producer.json` and `/root/.znn/wallet/producer-password.txt`.
-9. Installs `/usr/local/bin/znn-testnet-agent` and a one-minute cron entry.
-10. Restarts `go-zenon` and sends an initial status report.
+2. Installs `/usr/local/bin/znn-testnet-agent`.
+3. Installs a one-minute cron entry.
+4. Reports a `Waiting` node status to the admin panel.
+5. Keeps polling until an admin clicks **Publish Release**.
+
+After **Publish Release**, the agent:
+
+1. Downloads the authenticated bootstrap manifest with the pillar token.
+2. Clones `DEPLOYMENT_REPO` at `DEPLOYMENT_REF`.
+3. Runs `./zenon.sh --deploy zenon "$GO_ZENON_REPO" "$GO_ZENON_REF"` to build and install go-zenon.
+4. Stops `go-zenon`.
+5. Writes `/root/.znn/genesis.json`.
+6. Writes the pillar-specific `/root/.znn/config.json`.
+7. Writes `/root/.znn/wallet/producer.json` and `/root/.znn/wallet/producer-password.txt`.
+8. Restarts `go-zenon` and sends a status report.
 
 The token in the bootstrap command also authorizes producer downloads and node status reporting. Treat it like an operator secret.
 

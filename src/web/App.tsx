@@ -622,6 +622,7 @@ function nodeHealth(pillar: PublicPillar): { label: string; tone: "ok" | "warn" 
 
   const ageMs = Date.now() - Date.parse(latest.receivedAt);
   if (!Number.isNaN(ageMs) && ageMs > 5 * 60 * 1000) return { label: "Stale", tone: "bad" };
+  if (latest.node?.waitingForRelease) return { label: "Waiting", tone: "warn" };
   if (latest.node?.serviceActive === false) return { label: "Service down", tone: "bad" };
   if ((latest.logs?.errorCountLastMinute ?? 0) > 0) return { label: "Errors", tone: "bad" };
   if (latest.sync?.state !== undefined && latest.sync.state !== 2) return { label: syncStateLabel(latest.sync.state), tone: "warn" };
@@ -675,8 +676,8 @@ function NodeStatusPanel({ pillars, refresh }: { pillars: PublicPillar[]; refres
                   <td className="mono">{heightLag(pillar)}</td>
                   <td>{syncStateLabel(latest?.sync?.state)}</td>
                   <td className="mono">{latest?.network?.peerCount ?? "-"}</td>
-                  <td className="mono">{latest?.node?.installedRef ?? "-"}</td>
-                  <td>{latest?.node?.serviceActive === undefined ? "-" : latest.node.serviceActive ? "active" : "down"}</td>
+                  <td className="mono">{latest?.node?.waitingForRelease ? "waiting" : latest?.node?.installedRef ?? "-"}</td>
+                  <td>{latest?.node?.waitingForRelease ? "waiting" : latest?.node?.serviceActive === undefined ? "-" : latest.node.serviceActive ? "active" : "down"}</td>
                   <td>
                     <span className="mono">
                       E:{latest?.logs?.errorCountLastMinute ?? 0} W:{latest?.logs?.warningCountLastMinute ?? 0}

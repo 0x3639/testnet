@@ -162,6 +162,7 @@ export interface NodeStatusReport {
   node?: {
     hostname?: string;
     serviceActive?: boolean;
+    waitingForRelease?: boolean;
     installedRepo?: string;
     installedRef?: string;
     installedCommit?: string;

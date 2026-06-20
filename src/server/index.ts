@@ -99,6 +99,7 @@ const nodeStatusReportSchema = z.object({
     .object({
       hostname: optionalShortText,
       serviceActive: z.boolean().optional(),
+      waitingForRelease: z.boolean().optional(),
       installedRepo: z.string().trim().max(300).optional(),
       installedRef: optionalShortText,
       installedCommit: optionalShortText,
@@ -393,40 +394,8 @@ RPC_URL="\${ZNN_RPC_URL:-http://127.0.0.1:35997}"
 
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git jq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git jq util-linux
 fi
-
-api() {
-  curl -fsSL -H "Authorization: Bearer \${ZNN_BOOTSTRAP_TOKEN}" "$1"
-}
-
-manifest="$(api "\${BASE_URL}/api/bootstrap/manifest")"
-go_repo="$(printf '%s' "$manifest" | jq -r '.goZenon.repoUrl')"
-go_ref="$(printf '%s' "$manifest" | jq -r '.goZenon.ref')"
-deployment_repo="$(printf '%s' "$manifest" | jq -r '.deployment.repoUrl')"
-deployment_ref="$(printf '%s' "$manifest" | jq -r '.deployment.ref')"
-genesis_url="$(printf '%s' "$manifest" | jq -r '.genesisUrl')"
-config_url="$(printf '%s' "$manifest" | jq -r '.configUrl')"
-producer_url="$(printf '%s' "$manifest" | jq -r '.producerKeyFileUrl')"
-producer_password_url="$(printf '%s' "$manifest" | jq -r '.producerPasswordUrl')"
-
-rm -rf "$DEPLOYMENT_DIR"
-git clone --depth 1 --branch "$deployment_ref" "$deployment_repo" "$DEPLOYMENT_DIR"
-chmod +x "$DEPLOYMENT_DIR/zenon.sh"
-
-cd "$DEPLOYMENT_DIR"
-./zenon.sh --deploy zenon "$go_repo" "$go_ref"
-
-systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-
-mkdir -p "$ZNN_DIR/wallet"
-api "$genesis_url" > "$ZNN_DIR/genesis.json"
-api "$config_url" > "$ZNN_DIR/config.json"
-api "$producer_url" > "$ZNN_DIR/wallet/producer.json"
-api "$producer_password_url" > "$ZNN_DIR/wallet/producer-password.txt"
-
-chmod 700 "$ZNN_DIR" "$ZNN_DIR/wallet"
-chmod 600 "$ZNN_DIR/genesis.json" "$ZNN_DIR/config.json" "$ZNN_DIR/wallet/producer.json" "$ZNN_DIR/wallet/producer-password.txt"
 
 cat > /usr/local/bin/znn-testnet-agent <<'AGENT'
 #!/usr/bin/env bash
@@ -435,12 +404,32 @@ set -euo pipefail
 : "\${ZNN_BOOTSTRAP_TOKEN:?Missing ZNN_BOOTSTRAP_TOKEN.}"
 
 BASE_URL="\${ZNN_TESTNET_URL:-${origin}}"
+ZNN_DIR="\${ZNN_DIR:-/root/.znn}"
+DEPLOYMENT_DIR="\${ZNN_DEPLOYMENT_DIR:-/opt/zenon-deployment}"
 RPC_URL="\${ZNN_RPC_URL:-http://127.0.0.1:35997}"
 SERVICE_NAME="\${ZNN_SERVICE_NAME:-go-zenon}"
 STATE_DIR="\${ZNN_AGENT_STATE_DIR:-/var/lib/znn-testnet-agent}"
-STATE_FILE="$STATE_DIR/state.json"
+INSTALL_STATE_FILE="$STATE_DIR/install-state.json"
+STATUS_FILE="$STATE_DIR/status.json"
 
 mkdir -p "$STATE_DIR"
+
+auth_get() {
+  curl -fsSL -H "Authorization: Bearer $ZNN_BOOTSTRAP_TOKEN" "$1"
+}
+
+try_auth_get() {
+  local tmp code
+  tmp="$(mktemp)"
+  code="$(curl -sS -H "Authorization: Bearer $ZNN_BOOTSTRAP_TOKEN" -w "%{http_code}" -o "$tmp" "$1" || true)"
+  if [[ "$code" == "200" ]]; then
+    cat "$tmp"
+    rm -f "$tmp"
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
 
 rpc() {
   curl -fsS --max-time 5 -H "Content-Type: application/json" \\
@@ -448,73 +437,163 @@ rpc() {
     "$RPC_URL" | jq -c '.result // {}'
 }
 
-sync_json="$(rpc stats.syncInfo || echo '{}')"
-network_json="$(rpc stats.networkInfo || echo '{}')"
-service_active=false
-if systemctl is-active --quiet "$SERVICE_NAME"; then
-  service_active=true
+install_release() {
+  local manifest="$1"
+  local event_id go_repo go_ref go_commit deployment_repo deployment_ref genesis_url config_url producer_url producer_password_url desired_key installed_key
+
+  event_id="$(printf '%s' "$manifest" | jq -r '.eventId')"
+  go_repo="$(printf '%s' "$manifest" | jq -r '.goZenon.repoUrl')"
+  go_ref="$(printf '%s' "$manifest" | jq -r '.goZenon.ref')"
+  go_commit="$(printf '%s' "$manifest" | jq -r '.goZenon.commit // empty')"
+  deployment_repo="$(printf '%s' "$manifest" | jq -r '.deployment.repoUrl')"
+  deployment_ref="$(printf '%s' "$manifest" | jq -r '.deployment.ref')"
+  genesis_url="$(printf '%s' "$manifest" | jq -r '.genesisUrl')"
+  config_url="$(printf '%s' "$manifest" | jq -r '.configUrl')"
+  producer_url="$(printf '%s' "$manifest" | jq -r '.producerKeyFileUrl')"
+  producer_password_url="$(printf '%s' "$manifest" | jq -r '.producerPasswordUrl')"
+  desired_key="$(printf '%s' "$manifest" | jq -r '[.eventId, .goZenon.repoUrl, .goZenon.ref, (.goZenon.commit // ""), .deployment.repoUrl, .deployment.ref] | @tsv')"
+  installed_key="$(jq -r '.desiredKey // empty' "$INSTALL_STATE_FILE" 2>/dev/null || true)"
+
+  if [[ "$desired_key" == "$installed_key" && -s "$ZNN_DIR/genesis.json" && -s "$ZNN_DIR/config.json" && -s "$ZNN_DIR/wallet/producer.json" ]]; then
+    return 0
+  fi
+
+  rm -rf "$DEPLOYMENT_DIR"
+  git clone --depth 1 --branch "$deployment_ref" "$deployment_repo" "$DEPLOYMENT_DIR"
+  chmod +x "$DEPLOYMENT_DIR/zenon.sh"
+
+  cd "$DEPLOYMENT_DIR"
+  ./zenon.sh --deploy zenon "$go_repo" "$go_ref"
+
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+  fi
+
+  mkdir -p "$ZNN_DIR/wallet"
+  auth_get "$genesis_url" > "$ZNN_DIR/genesis.json"
+  auth_get "$config_url" > "$ZNN_DIR/config.json"
+  auth_get "$producer_url" > "$ZNN_DIR/wallet/producer.json"
+  auth_get "$producer_password_url" > "$ZNN_DIR/wallet/producer-password.txt"
+
+  chmod 700 "$ZNN_DIR" "$ZNN_DIR/wallet"
+  chmod 600 "$ZNN_DIR/genesis.json" "$ZNN_DIR/config.json" "$ZNN_DIR/wallet/producer.json" "$ZNN_DIR/wallet/producer-password.txt"
+
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl restart "$SERVICE_NAME"
+  fi
+
+  jq -n \\
+    --arg desiredKey "$desired_key" \\
+    --arg eventId "$event_id" \\
+    --arg installedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
+    --arg goRepo "$go_repo" \\
+    --arg goRef "$go_ref" \\
+    --arg goCommit "$go_commit" \\
+    --arg deploymentRepo "$deployment_repo" \\
+    --arg deploymentRef "$deployment_ref" \\
+    '{
+      desiredKey: $desiredKey,
+      eventId: $eventId,
+      installedAt: $installedAt,
+      goZenon: { repoUrl: $goRepo, ref: $goRef, commit: $goCommit },
+      deployment: { repoUrl: $deploymentRepo, ref: $deploymentRef }
+    }' > "$INSTALL_STATE_FILE"
+}
+
+report_status() {
+  local manifest="\${1:-}"
+  local waiting="\${2:-false}"
+  local event_id go_repo go_ref go_commit sync_json network_json service_active logs error_count warn_count recent_json payload
+
+  if [[ -n "$manifest" ]]; then
+    event_id="$(printf '%s' "$manifest" | jq -r '.eventId')"
+    go_repo="$(printf '%s' "$manifest" | jq -r '.goZenon.repoUrl')"
+    go_ref="$(printf '%s' "$manifest" | jq -r '.goZenon.ref')"
+    go_commit="$(printf '%s' "$manifest" | jq -r '.goZenon.commit // empty')"
+  else
+    event_id="waiting-for-release"
+    go_repo=""
+    go_ref=""
+    go_commit=""
+  fi
+
+  sync_json="$(rpc stats.syncInfo || echo '{}')"
+  network_json="$(rpc stats.networkInfo || echo '{}')"
+  service_active=false
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$SERVICE_NAME"; then
+    service_active=true
+  fi
+
+  logs="$(journalctl -u "$SERVICE_NAME" --since '1 minute ago' --no-pager 2>/dev/null | grep -Eai 'error|warn|panic|fatal|failed|exception' | tail -20 || true)"
+  error_count="$(printf '%s\\n' "$logs" | grep -Eai 'error|panic|fatal|failed|exception' | grep -c . || true)"
+  warn_count="$(printf '%s\\n' "$logs" | grep -Eai 'warn' | grep -c . || true)"
+  recent_json="$(printf '%s\\n' "$logs" | jq -R . | jq -s .)"
+
+  payload="$(jq -n \\
+    --arg eventId "$event_id" \\
+    --arg reportedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
+    --arg hostname "$(hostname)" \\
+    --arg goRepo "$go_repo" \\
+    --arg goRef "$go_ref" \\
+    --arg goCommit "$go_commit" \\
+    --argjson serviceActive "$service_active" \\
+    --argjson waiting "$waiting" \\
+    --argjson sync "$sync_json" \\
+    --argjson network "$network_json" \\
+    --argjson errors "$error_count" \\
+    --argjson warnings "$warn_count" \\
+    --argjson recent "$recent_json" \\
+    '{
+      eventId: $eventId,
+      reportedAt: $reportedAt,
+      node: {
+        hostname: $hostname,
+        serviceActive: $serviceActive,
+        waitingForRelease: $waiting,
+        installedRepo: $goRepo,
+        installedRef: $goRef,
+        installedCommit: $goCommit
+      },
+      sync: {
+        state: $sync.state,
+        currentHeight: $sync.currentHeight,
+        targetHeight: $sync.targetHeight
+      },
+      network: {
+        peerCount: (($network.peers // []) | length),
+        selfPublicKey: $network.self.publicKey,
+        selfIp: $network.self.ip,
+        peers: (($network.peers // []) | map({
+          publicKey: .publicKey,
+          ip: .ip,
+          name: .name,
+          version: .version
+        }) | .[0:20])
+      },
+      logs: {
+        errorCountLastMinute: $errors,
+        warningCountLastMinute: $warnings,
+        recent: $recent
+      }
+    }')"
+
+  curl -fsS -X POST "$BASE_URL/api/bootstrap/status" \\
+    -H "Authorization: Bearer $ZNN_BOOTSTRAP_TOKEN" \\
+    -H "Content-Type: application/json" \\
+    -d "$payload" >/dev/null || true
+
+  printf '%s\\n' "$payload" > "$STATUS_FILE"
+}
+
+manifest="$(try_auth_get "$BASE_URL/api/bootstrap/manifest" || true)"
+if [[ -z "$manifest" ]]; then
+  report_status "" true
+  echo "No published release is available yet. Waiting for Publish Release."
+  exit 0
 fi
 
-logs="$(journalctl -u "$SERVICE_NAME" --since '1 minute ago' --no-pager 2>/dev/null | grep -Eai 'error|warn|panic|fatal|failed|exception' | tail -20 || true)"
-error_count="$(printf '%s\\n' "$logs" | grep -Eai 'error|panic|fatal|failed|exception' | grep -c . || true)"
-warn_count="$(printf '%s\\n' "$logs" | grep -Eai 'warn' | grep -c . || true)"
-recent_json="$(printf '%s\\n' "$logs" | jq -R . | jq -s .)"
-
-manifest="$(curl -fsSL -H "Authorization: Bearer $ZNN_BOOTSTRAP_TOKEN" "$BASE_URL/api/bootstrap/manifest")"
-go_repo="$(printf '%s' "$manifest" | jq -r '.goZenon.repoUrl')"
-go_ref="$(printf '%s' "$manifest" | jq -r '.goZenon.ref')"
-go_commit="$(printf '%s' "$manifest" | jq -r '.goZenon.commit // empty')"
-
-payload="$(jq -n \\
-  --arg reportedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
-  --arg hostname "$(hostname)" \\
-  --arg goRepo "$go_repo" \\
-  --arg goRef "$go_ref" \\
-  --arg goCommit "$go_commit" \\
-  --argjson serviceActive "$service_active" \\
-  --argjson sync "$sync_json" \\
-  --argjson network "$network_json" \\
-  --argjson errors "$error_count" \\
-  --argjson warnings "$warn_count" \\
-  --argjson recent "$recent_json" \\
-  '{
-    reportedAt: $reportedAt,
-    node: {
-      hostname: $hostname,
-      serviceActive: $serviceActive,
-      installedRepo: $goRepo,
-      installedRef: $goRef,
-      installedCommit: $goCommit
-    },
-    sync: {
-      state: $sync.state,
-      currentHeight: $sync.currentHeight,
-      targetHeight: $sync.targetHeight
-    },
-    network: {
-      peerCount: (($network.peers // []) | length),
-      selfPublicKey: $network.self.publicKey,
-      selfIp: $network.self.ip,
-      peers: (($network.peers // []) | map({
-        publicKey: .publicKey,
-        ip: .ip,
-        name: .name,
-        version: .version
-      }) | .[0:20])
-    },
-    logs: {
-      errorCountLastMinute: $errors,
-      warningCountLastMinute: $warnings,
-      recent: $recent
-    }
-  }')"
-
-curl -fsS -X POST "$BASE_URL/api/bootstrap/status" \\
-  -H "Authorization: Bearer $ZNN_BOOTSTRAP_TOKEN" \\
-  -H "Content-Type: application/json" \\
-  -d "$payload" >/dev/null
-
-printf '%s\\n' "$payload" > "$STATE_FILE"
+install_release "$manifest"
+report_status "$manifest" false
 AGENT
 
 chmod 700 /usr/local/bin/znn-testnet-agent
@@ -528,10 +607,9 @@ ZNN_SERVICE_NAME=$SERVICE_NAME
 EOF
 chmod 600 /etc/cron.d/znn-testnet-agent
 
-systemctl restart "$SERVICE_NAME"
 /usr/local/bin/znn-testnet-agent || true
 
-echo "Zenon testnet node installed and configured."
+echo "Zenon testnet bootstrap installed. The agent will apply the release after Publish Release."
 `;
 }
 
