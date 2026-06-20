@@ -55,6 +55,7 @@ export interface NetworkSettings {
   goZenonCommit?: string;
   deploymentRepo: string;
   deploymentRef: string;
+  wipeDataOnPublish: boolean;
   sporkAddress: string;
   sporkWallet?: StoredWallet;
   seeders: string[];
@@ -120,11 +121,16 @@ export interface ReleaseTarget {
   };
 }
 
+export interface ReleaseActions {
+  wipeData: boolean;
+}
+
 export interface PublishedNodePlan extends ReleaseTarget {
   schemaVersion: number;
   eventId: string;
   publishedAt: string;
   finalizedAt?: string;
+  actions: ReleaseActions;
 }
 
 export interface PublishedArtifacts {
@@ -145,6 +151,7 @@ export interface PublishedArtifactsInfo {
   chainIdentifier: number;
   seeders: string[];
   release?: ReleaseTarget;
+  actions?: ReleaseActions;
 }
 
 export interface NodePeerSummary {

@@ -551,6 +551,7 @@ function PublishedArtifacts({ published }: { published: PublishedArtifactsInfo }
           <span className="mono mutedText">chain {published.chainIdentifier}</span>
           <span className="mono mutedText">{published.seeders.length} seeder{published.seeders.length === 1 ? "" : "s"}</span>
           {published.release ? <span className="mono mutedText">{published.release.goZenon.ref}</span> : null}
+          {published.actions?.wipeData ? <span className="statusPill warn">Wipe data</span> : null}
           <Button variant="secondary" icon={<Copy size={18} />} onClick={() => copy(wgetCommands)}>
             Copy wget
           </Button>
@@ -854,6 +855,14 @@ function SettingsForm({
             onChange={(event) => setDraft({ ...draft, deploymentRepo: event.target.value })}
           />
         </label>
+        <label className="checkboxRow">
+          <input
+            type="checkbox"
+            checked={draft.wipeDataOnPublish}
+            onChange={(event) => setDraft({ ...draft, wipeDataOnPublish: event.target.checked })}
+          />
+          <span>Wipe node data on next Publish Release</span>
+        </label>
       </div>
       <div className="seedProbe">
         <div className="panelHeader">
@@ -937,6 +946,7 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
         goZenonCommit: settings.goZenonCommit,
         deploymentRepo: settings.deploymentRepo,
         deploymentRef: settings.deploymentRef,
+        wipeDataOnPublish: settings.wipeDataOnPublish,
         seeders: settings.seeders,
         sporks: settings.sporks
       })

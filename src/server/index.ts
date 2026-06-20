@@ -72,6 +72,7 @@ const settingsSchema = z.object({
   goZenonCommit: z.string().trim().max(80).optional(),
   deploymentRepo: z.string().trim().min(1).max(300),
   deploymentRef: z.string().trim().min(1).max(160),
+  wipeDataOnPublish: z.boolean().default(false),
   seeders: z.array(z.string().trim().min(1)).max(100),
   sporks: z.array(
     z.object({
@@ -248,7 +249,8 @@ function publishedInfo(published?: PublishedArtifacts): PublishedArtifactsInfo |
           goZenon: published.nodePlan.goZenon,
           deployment: published.nodePlan.deployment
         }
-      : undefined
+      : undefined,
+    actions: published.nodePlan?.actions
   };
 }
 
@@ -325,6 +327,9 @@ function buildPublishedNodePlan(settings: NetworkSettingsSnapshot, publishedAt: 
     eventId: publishedAt,
     publishedAt,
     finalizedAt,
+    actions: {
+      wipeData: settings.wipeDataOnPublish
+    },
     ...releaseTarget(settings)
   };
 }
@@ -348,6 +353,7 @@ function bootstrapManifest(request: express.Request, published: PublishedArtifac
     producerPasswordUrl: `${origin}/api/bootstrap/producer-password.txt`,
     nodePlanUrl: `${origin}${PUBLIC_NODE_PLAN_PATH}`,
     statusUrl: `${origin}/api/bootstrap/status`,
+    actions: nodePlan.actions,
     goZenon: nodePlan.goZenon,
     deployment: nodePlan.deployment
   };
@@ -437,9 +443,25 @@ rpc() {
     "$RPC_URL" | jq -c '.result // {}'
 }
 
+wipe_data_dir() {
+  local item base
+  mkdir -p "$ZNN_DIR"
+  shopt -s dotglob nullglob
+  for item in "$ZNN_DIR"/*; do
+    base="$(basename "$item")"
+    case "$base" in
+      wallet|genesis.json|config.json|network-private-key)
+        continue
+        ;;
+    esac
+    rm -rf -- "$item"
+  done
+  shopt -u dotglob nullglob
+}
+
 install_release() {
   local manifest="$1"
-  local event_id go_repo go_ref go_commit deployment_repo deployment_ref genesis_url config_url producer_url producer_password_url desired_key installed_key
+  local event_id go_repo go_ref go_commit deployment_repo deployment_ref genesis_url config_url producer_url producer_password_url wipe_data desired_key installed_key binary_key installed_binary_key binary_missing
 
   event_id="$(printf '%s' "$manifest" | jq -r '.eventId')"
   go_repo="$(printf '%s' "$manifest" | jq -r '.goZenon.repoUrl')"
@@ -447,26 +469,43 @@ install_release() {
   go_commit="$(printf '%s' "$manifest" | jq -r '.goZenon.commit // empty')"
   deployment_repo="$(printf '%s' "$manifest" | jq -r '.deployment.repoUrl')"
   deployment_ref="$(printf '%s' "$manifest" | jq -r '.deployment.ref')"
+  wipe_data="$(printf '%s' "$manifest" | jq -r '.actions.wipeData // false')"
   genesis_url="$(printf '%s' "$manifest" | jq -r '.genesisUrl')"
   config_url="$(printf '%s' "$manifest" | jq -r '.configUrl')"
   producer_url="$(printf '%s' "$manifest" | jq -r '.producerKeyFileUrl')"
   producer_password_url="$(printf '%s' "$manifest" | jq -r '.producerPasswordUrl')"
-  desired_key="$(printf '%s' "$manifest" | jq -r '[.eventId, .goZenon.repoUrl, .goZenon.ref, (.goZenon.commit // ""), .deployment.repoUrl, .deployment.ref] | @tsv')"
+  desired_key="$(printf '%s' "$manifest" | jq -r '[.eventId, .goZenon.repoUrl, .goZenon.ref, (.goZenon.commit // ""), .deployment.repoUrl, .deployment.ref, (.actions.wipeData // false)] | @tsv')"
+  binary_key="$(printf '%s' "$manifest" | jq -r '[.goZenon.repoUrl, .goZenon.ref, (.goZenon.commit // ""), .deployment.repoUrl, .deployment.ref] | @tsv')"
   installed_key="$(jq -r '.desiredKey // empty' "$INSTALL_STATE_FILE" 2>/dev/null || true)"
+  installed_binary_key="$(jq -r '.binaryKey // empty' "$INSTALL_STATE_FILE" 2>/dev/null || true)"
+  binary_missing=false
+  if ! command -v znnd >/dev/null 2>&1; then
+    binary_missing=true
+  fi
 
   if [[ "$desired_key" == "$installed_key" && -s "$ZNN_DIR/genesis.json" && -s "$ZNN_DIR/config.json" && -s "$ZNN_DIR/wallet/producer.json" ]]; then
     return 0
   fi
 
-  rm -rf "$DEPLOYMENT_DIR"
-  git clone --depth 1 --branch "$deployment_ref" "$deployment_repo" "$DEPLOYMENT_DIR"
-  chmod +x "$DEPLOYMENT_DIR/zenon.sh"
-
-  cd "$DEPLOYMENT_DIR"
-  ./zenon.sh --deploy zenon "$go_repo" "$go_ref"
-
   if command -v systemctl >/dev/null 2>&1; then
     systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+  fi
+
+  if [[ "$binary_key" != "$installed_binary_key" || "$binary_missing" == "true" ]]; then
+    rm -rf "$DEPLOYMENT_DIR"
+    git clone --depth 1 --branch "$deployment_ref" "$deployment_repo" "$DEPLOYMENT_DIR"
+    chmod +x "$DEPLOYMENT_DIR/zenon.sh"
+
+    cd "$DEPLOYMENT_DIR"
+    ./zenon.sh --deploy zenon "$go_repo" "$go_ref"
+
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  if [[ "$wipe_data" == "true" ]]; then
+    wipe_data_dir
   fi
 
   mkdir -p "$ZNN_DIR/wallet"
@@ -484,6 +523,7 @@ install_release() {
 
   jq -n \\
     --arg desiredKey "$desired_key" \\
+    --arg binaryKey "$binary_key" \\
     --arg eventId "$event_id" \\
     --arg installedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
     --arg goRepo "$go_repo" \\
@@ -491,12 +531,15 @@ install_release() {
     --arg goCommit "$go_commit" \\
     --arg deploymentRepo "$deployment_repo" \\
     --arg deploymentRef "$deployment_ref" \\
+    --argjson wipeData "$wipe_data" \\
     '{
       desiredKey: $desiredKey,
+      binaryKey: $binaryKey,
       eventId: $eventId,
       installedAt: $installedAt,
       goZenon: { repoUrl: $goRepo, ref: $goRef, commit: $goCommit },
-      deployment: { repoUrl: $deploymentRepo, ref: $deploymentRef }
+      deployment: { repoUrl: $deploymentRepo, ref: $deploymentRef },
+      actions: { wipeData: $wipeData }
     }' > "$INSTALL_STATE_FILE"
 }
 
@@ -991,6 +1034,7 @@ async function main() {
         chainIdentifier: settings.chainIdentifier,
         seeders: [...settings.seeders]
       };
+      state.settings.wipeDataOnPublish = false;
       return state.publishedArtifacts;
     });
     response.json({ published: publishedInfo(result) });

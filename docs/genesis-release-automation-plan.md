@@ -119,6 +119,9 @@ Example:
     "ref": "devnet-v1.0.0-rc1",
     "commit": "optional-pinned-commit"
   },
+  "actions": {
+    "wipeData": false
+  },
   "deployment": {
     "repoUrl": "https://github.com/hypercore-one/deployment.git",
     "ref": "main"
@@ -174,6 +177,9 @@ Example:
     "repoUrl": "https://github.com/zenon-network/go-zenon.git",
     "ref": "devnet-v1.0.0-rc1"
   },
+  "actions": {
+    "wipeData": false
+  },
   "deployment": {
     "repoUrl": "https://github.com/hypercore-one/deployment.git",
     "ref": "main"
@@ -200,12 +206,13 @@ The implemented first-pass script:
 7. Clone `hypercore-one/deployment`.
 8. Run the deployment script to build and install go-zenon.
 9. Stop `go-zenon`.
-10. Create `/root/.znn` and `/root/.znn/wallet`.
-11. Download `genesis.json`.
-12. Download the pillar-specific `config.json`.
-13. Download the producer keyfile and password.
-14. Write files with strict permissions.
-15. Restart `go-zenon` and send a status report.
+10. Wipe data when the published plan has `actions.wipeData: true`.
+11. Create `/root/.znn` and `/root/.znn/wallet`.
+12. Download `genesis.json`.
+13. Download the pillar-specific `config.json`.
+14. Download the producer keyfile and password.
+15. Write files with strict permissions.
+16. Restart `go-zenon` and send a status report.
 
 The deployment repo already supports non-interactive deployment:
 
@@ -378,6 +385,7 @@ Add per-event release fields:
 - deployment repo URL. Done as a persisted admin setting.
 - deployment ref. Done as a persisted admin setting.
 - explicit publish gate for `/node-plan.json`. Done.
+- one-shot wipe data flag. Done as a published release action.
 - not-before time
 - stagger seconds
 - release status

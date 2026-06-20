@@ -81,7 +81,7 @@ DEPLOYMENT_REPO=https://github.com/hypercore-one/deployment.git
 DEPLOYMENT_REF=main
 ```
 
-After the app is running, admins can edit the go-zenon repo/ref, optional commit label, deployment repo, and deployment ref from the Settings panel. Saving these values only updates the draft settings. They do not reach `/node-plan.json` or authenticated bootstrap manifests until an admin clicks **Publish Release**. Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`.
+After the app is running, admins can edit the go-zenon repo/ref, optional commit label, deployment repo, deployment ref, and one-shot data wipe flag from the Settings panel. Saving these values only updates the draft settings. They do not reach `/node-plan.json` or authenticated bootstrap manifests until an admin clicks **Publish Release**. Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`.
 
 ## Standalone Docker
 
@@ -303,10 +303,13 @@ After **Publish Release**, the agent:
 2. Clones `DEPLOYMENT_REPO` at `DEPLOYMENT_REF`.
 3. Runs `./zenon.sh --deploy zenon "$GO_ZENON_REPO" "$GO_ZENON_REF"` to build and install go-zenon.
 4. Stops `go-zenon`.
-5. Writes `/root/.znn/genesis.json`.
-6. Writes the pillar-specific `/root/.znn/config.json`.
-7. Writes `/root/.znn/wallet/producer.json` and `/root/.znn/wallet/producer-password.txt`.
-8. Restarts `go-zenon` and sends a status report.
+5. Wipes node data if the published node plan has `actions.wipeData: true`.
+6. Writes `/root/.znn/genesis.json`.
+7. Writes the pillar-specific `/root/.znn/config.json`.
+8. Writes `/root/.znn/wallet/producer.json` and `/root/.znn/wallet/producer-password.txt`.
+9. Restarts `go-zenon` and sends a status report.
+
+The wipe action is controlled by **Wipe node data on next Publish Release** in admin Settings. It is one-shot: publishing a release snapshots the flag into `/node-plan.json`, then clears the draft checkbox. The agent preserves `/root/.znn/wallet`, `/root/.znn/genesis.json`, `/root/.znn/config.json`, and `/root/.znn/network-private-key`, and removes other files/directories under `/root/.znn` before writing the published artifacts.
 
 The token in the bootstrap command also authorizes producer downloads and node status reporting. Treat it like an operator secret.
 
@@ -366,7 +369,7 @@ https://<TESTNET_HOST>/config.json
 https://<TESTNET_HOST>/node-plan.json
 ```
 
-Publishing stores a snapshot. If settings, seeders, pillars, finalized genesis data, or release target values change later, save them as draft changes first, then click **Publish Release** again to update the public files and node plan. Saving settings alone does not force an upgrade.
+Publishing stores a snapshot. If settings, seeders, pillars, finalized genesis data, release target values, or the wipe flag change later, save them as draft changes first, then click **Publish Release** again to update the public files and node plan. Saving settings alone does not force an upgrade or wipe.
 
 ## Seeders
 

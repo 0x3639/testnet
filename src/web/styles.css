@@ -113,6 +113,10 @@ textarea {
   outline: none;
 }
 
+input[type="checkbox"] {
+  width: auto;
+}
+
 input:focus,
 select:focus,
 textarea:focus,
@@ -476,6 +480,13 @@ textarea {
   gap: 8px;
   align-items: center;
   min-width: 300px;
+}
+
+.checkboxRow {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 10px;
 }
 
 .ok {

@@ -23,6 +23,7 @@ function defaultSettings(): NetworkSettings {
     goZenonCommit: DEFAULT_GO_ZENON_COMMIT,
     deploymentRepo: DEFAULT_DEPLOYMENT_REPO,
     deploymentRef: DEFAULT_DEPLOYMENT_REF,
+    wipeDataOnPublish: false,
     sporkAddress: "",
     seeders: [],
     sporks: DEFAULT_SPORKS.map((spork) => ({ ...spork }))
