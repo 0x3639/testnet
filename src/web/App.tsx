@@ -537,7 +537,8 @@ function UserManagement({
 function PublishedArtifacts({ published }: { published: PublishedArtifactsInfo }) {
   const genesisUrl = publicUrl(published.genesisPath);
   const configUrl = publicUrl(published.configPath);
-  const wgetCommands = `wget ${genesisUrl}\nwget ${configUrl}`;
+  const nodePlanUrl = published.nodePlanPath ? publicUrl(published.nodePlanPath) : "";
+  const wgetCommands = [`wget ${genesisUrl}`, `wget ${configUrl}`, nodePlanUrl ? `wget ${nodePlanUrl}` : ""].filter(Boolean).join("\n");
 
   return (
     <div className="publishedBlock">
@@ -549,6 +550,7 @@ function PublishedArtifacts({ published }: { published: PublishedArtifactsInfo }
         <div className="toolbar">
           <span className="mono mutedText">chain {published.chainIdentifier}</span>
           <span className="mono mutedText">{published.seeders.length} seeder{published.seeders.length === 1 ? "" : "s"}</span>
+          {published.release ? <span className="mono mutedText">{published.release.goZenon.ref}</span> : null}
           <Button variant="secondary" icon={<Copy size={18} />} onClick={() => copy(wgetCommands)}>
             Copy wget
           </Button>
@@ -573,6 +575,17 @@ function PublishedArtifacts({ published }: { published: PublishedArtifactsInfo }
             Copy
           </Button>
         </div>
+        {nodePlanUrl ? (
+          <div className="publishedRow">
+            <span className="ledger">Node Plan</span>
+            <a className="mono" href={nodePlanUrl}>
+              {nodePlanUrl}
+            </a>
+            <Button variant="secondary" icon={<Copy size={18} />} onClick={() => copy(nodePlanUrl)}>
+              Copy
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -1079,7 +1092,7 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
               Finalize
             </Button>
             <Button icon={<Server size={18} />} onClick={publish} disabled={publishing}>
-              {publishing ? "Publishing" : "Publish"}
+              {publishing ? "Publishing" : "Publish Release"}
             </Button>
           </div>
         </div>

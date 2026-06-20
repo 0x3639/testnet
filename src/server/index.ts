@@ -10,7 +10,17 @@ import { buildPillarPackage, buildSporkPackage } from "./packages.js";
 import { probeSeedNode, validateSeedNodeIp } from "./seeders.js";
 import { readState, updateState } from "./storage.js";
 import { createWallet, toStoredWallet } from "./wallets.js";
-import type { AppState, ManagedUser, NetworkSettings, NodeStatusReport, PillarRecord, PublishedArtifacts, PublishedArtifactsInfo, PublicNetworkSettings } from "../shared/types.js";
+import type {
+  AppState,
+  ManagedUser,
+  NetworkSettings,
+  NetworkSettingsSnapshot,
+  NodeStatusReport,
+  PillarRecord,
+  PublishedArtifacts,
+  PublishedArtifactsInfo,
+  PublicNetworkSettings
+} from "../shared/types.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const PUBLIC_GENESIS_PATH = "/genesis.json";
@@ -229,9 +239,25 @@ function publishedInfo(published?: PublishedArtifacts): PublishedArtifactsInfo |
     publishedAt: published.publishedAt,
     genesisPath: PUBLIC_GENESIS_PATH,
     configPath: PUBLIC_CONFIG_PATH,
+    nodePlanPath: published.nodePlan ? PUBLIC_NODE_PLAN_PATH : undefined,
     chainIdentifier: published.chainIdentifier,
-    seeders: published.seeders
+    seeders: published.seeders,
+    release: published.nodePlan
+      ? {
+          goZenon: published.nodePlan.goZenon,
+          deployment: published.nodePlan.deployment
+        }
+      : undefined
   };
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function settingsSnapshot(settings: NetworkSettings): NetworkSettingsSnapshot {
+  const { sporkWallet: _sporkWallet, ...snapshot } = settings;
+  return cloneJson(snapshot);
 }
 
 function genesisSettingsKey(settings: NetworkSettings): string {
@@ -278,7 +304,7 @@ function pillarConfigForDeployment(settings: NetworkSettings, pillar: PillarReco
   });
 }
 
-function releaseTarget(settings: NetworkSettings) {
+function releaseTarget(settings: NetworkSettings | NetworkSettingsSnapshot) {
   return {
     goZenon: {
       repoUrl: settings.goZenonRepo,
@@ -292,21 +318,25 @@ function releaseTarget(settings: NetworkSettings) {
   };
 }
 
-function nodePlan(state: AppState) {
+function buildPublishedNodePlan(settings: NetworkSettingsSnapshot, publishedAt: string, finalizedAt?: string) {
   return {
     schemaVersion: 1,
-    eventId: state.publishedArtifacts?.publishedAt ?? state.finalizedGenesis?.finalizedAt ?? "draft",
-    publishedAt: state.publishedArtifacts?.publishedAt,
-    finalizedAt: state.finalizedGenesis?.finalizedAt,
-    ...releaseTarget(state.settings)
+    eventId: publishedAt,
+    publishedAt,
+    finalizedAt,
+    ...releaseTarget(settings)
   };
 }
 
-function bootstrapManifest(request: express.Request, state: AppState, pillar: PillarRecord) {
+function bootstrapManifest(request: express.Request, published: PublishedArtifacts, pillar: PillarRecord) {
   const origin = requestOrigin(request);
+  const nodePlan = published.nodePlan;
+  if (!nodePlan) throw new Error("node plan has not been published");
   return {
-    schemaVersion: 1,
-    eventId: state.publishedArtifacts?.publishedAt ?? state.finalizedGenesis?.finalizedAt ?? "draft",
+    schemaVersion: nodePlan.schemaVersion,
+    eventId: nodePlan.eventId,
+    publishedAt: published.publishedAt,
+    finalizedAt: nodePlan.finalizedAt,
     pillarName: pillar.pillarName,
     pillarAddress: pillar.pillarWallet.address,
     rewardAddress: pillar.rewardWallet.address,
@@ -317,7 +347,8 @@ function bootstrapManifest(request: express.Request, state: AppState, pillar: Pi
     producerPasswordUrl: `${origin}/api/bootstrap/producer-password.txt`,
     nodePlanUrl: `${origin}${PUBLIC_NODE_PLAN_PATH}`,
     statusUrl: `${origin}/api/bootstrap/status`,
-    ...releaseTarget(state.settings)
+    goZenon: nodePlan.goZenon,
+    deployment: nodePlan.deployment
   };
 }
 
@@ -591,7 +622,11 @@ async function main() {
 
   app.get(PUBLIC_NODE_PLAN_PATH, async (_request, response) => {
     const state = await readState();
-    sendJsonFile(response, nodePlan(state));
+    if (!state.publishedArtifacts?.nodePlan) {
+      response.status(404).json({ error: "node-plan.json has not been published" });
+      return;
+    }
+    sendJsonFile(response, state.publishedArtifacts.nodePlan);
   });
 
   app.post("/api/bootstrap/status", receiveNodeStatus);
@@ -605,13 +640,21 @@ async function main() {
 
   app.get("/api/bootstrap/manifest", async (request, response) => {
     await withBootstrapPillar(request, response, (state, pillar) => {
-      response.json(bootstrapManifest(request, state, pillar));
+      if (!state.publishedArtifacts?.nodePlan) {
+        response.status(404).json({ error: "No published release is available yet" });
+        return;
+      }
+      response.json(bootstrapManifest(request, state.publishedArtifacts, pillar));
     });
   });
 
   app.get("/api/bootstrap/pillar-config.json", async (request, response) => {
     await withBootstrapPillar(request, response, (state, pillar) => {
-      sendJsonFile(response, pillarConfigForDeployment(state.settings, pillar));
+      if (!state.publishedArtifacts?.settings) {
+        response.status(404).json({ error: "No published release is available yet" });
+        return;
+      }
+      sendJsonFile(response, pillarConfigForDeployment(state.publishedArtifacts.settings, pillar));
     });
   });
 
@@ -860,12 +903,15 @@ async function main() {
         };
       }
 
+      const settings = settingsSnapshot(state.settings);
       state.publishedArtifacts = {
         publishedAt: now,
         genesis,
-        config: buildNodeConfig(state.settings),
-        chainIdentifier: state.settings.chainIdentifier,
-        seeders: [...state.settings.seeders]
+        config: buildNodeConfig(settings),
+        nodePlan: buildPublishedNodePlan(settings, now, state.finalizedGenesis.finalizedAt),
+        settings,
+        chainIdentifier: settings.chainIdentifier,
+        seeders: [...settings.seeders]
       };
       return state.publishedArtifacts;
     });

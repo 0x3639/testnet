@@ -65,6 +65,8 @@ export type PublicNetworkSettings = Omit<NetworkSettings, "sporkWallet"> & {
   sporkWalletAddress?: string;
 };
 
+export type NetworkSettingsSnapshot = Omit<NetworkSettings, "sporkWallet">;
+
 export interface AppState {
   users: StoredUser[];
   sessions: StoredSession[];
@@ -106,10 +108,31 @@ export interface ReadinessCheck {
   detail: string;
 }
 
+export interface ReleaseTarget {
+  goZenon: {
+    repoUrl: string;
+    ref: string;
+    commit?: string;
+  };
+  deployment: {
+    repoUrl: string;
+    ref: string;
+  };
+}
+
+export interface PublishedNodePlan extends ReleaseTarget {
+  schemaVersion: number;
+  eventId: string;
+  publishedAt: string;
+  finalizedAt?: string;
+}
+
 export interface PublishedArtifacts {
   publishedAt: string;
   genesis: unknown;
   config: unknown;
+  nodePlan?: PublishedNodePlan;
+  settings?: NetworkSettingsSnapshot;
   chainIdentifier: number;
   seeders: string[];
 }
@@ -118,8 +141,10 @@ export interface PublishedArtifactsInfo {
   publishedAt: string;
   genesisPath: string;
   configPath: string;
+  nodePlanPath?: string;
   chainIdentifier: number;
   seeders: string[];
+  release?: ReleaseTarget;
 }
 
 export interface NodePeerSummary {

@@ -81,7 +81,7 @@ DEPLOYMENT_REPO=https://github.com/hypercore-one/deployment.git
 DEPLOYMENT_REF=main
 ```
 
-After the app is running, admins can edit the go-zenon repo/ref, optional commit label, deployment repo, and deployment ref from the Settings panel. These values drive both `/node-plan.json` and authenticated bootstrap manifests. Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`.
+After the app is running, admins can edit the go-zenon repo/ref, optional commit label, deployment repo, and deployment ref from the Settings panel. Saving these values only updates the draft settings. They do not reach `/node-plan.json` or authenticated bootstrap manifests until an admin clicks **Publish Release**. Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`.
 
 ## Standalone Docker
 
@@ -261,7 +261,7 @@ If you create a Portainer stack with the Web Editor instead of the Git Repositor
 6. Add or probe the seed node in the admin panel so `Net.Seeders` contains the seed node enode.
 7. Review the generated `genesis.json` and `config.json`.
 8. Finalize the genesis when registrations are complete.
-9. Publish the files so operators can fetch them without authentication.
+9. Click **Publish Release** when the current genesis, config, seeders, and release target should become active for operators.
 
 Admins can also reset user passwords, delete users, delete pillar registrations, and download the spork wallet package.
 
@@ -342,13 +342,14 @@ The admin panel shows the latest report for each pillar, including last seen tim
 
 ## Published Files
 
-After the admin clicks Publish, these files are served without authentication:
+After the admin clicks **Publish Release**, these files are served without authentication:
 
 Standalone Docker:
 
 ```text
 http://localhost:8080/genesis.json
 http://localhost:8080/config.json
+http://localhost:8080/node-plan.json
 ```
 
 Portainer/Caddy:
@@ -356,9 +357,10 @@ Portainer/Caddy:
 ```text
 https://<TESTNET_HOST>/genesis.json
 https://<TESTNET_HOST>/config.json
+https://<TESTNET_HOST>/node-plan.json
 ```
 
-Publishing stores a snapshot. If settings, seeders, pillars, or finalized genesis data change later, publish again to update the public files.
+Publishing stores a snapshot. If settings, seeders, pillars, finalized genesis data, or release target values change later, save them as draft changes first, then click **Publish Release** again to update the public files and node plan. Saving settings alone does not force an upgrade.
 
 ## Seeders
 

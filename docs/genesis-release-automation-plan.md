@@ -100,7 +100,7 @@ GET /events/:eventId/config.json
 
 ### `/node-plan.json`
 
-This endpoint tells nodes what release target should be running.
+This endpoint tells nodes what published release target should be running. Draft admin setting changes must not change this endpoint until an admin explicitly publishes the release.
 
 Example:
 
@@ -375,6 +375,7 @@ Add per-event release fields:
 - optional pinned commit SHA. Done as an optional admin setting for display/reporting.
 - deployment repo URL. Done as a persisted admin setting.
 - deployment ref. Done as a persisted admin setting.
+- explicit publish gate for `/node-plan.json`. Done.
 - not-before time
 - stagger seconds
 - release status
