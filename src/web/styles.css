@@ -380,6 +380,41 @@ textarea {
   text-transform: uppercase;
 }
 
+.statusPill {
+  display: inline-flex;
+  min-width: 86px;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+}
+
+.statusPill.ok {
+  border-color: rgba(0, 213, 87, 0.38);
+  color: var(--green);
+  background: rgba(0, 213, 87, 0.08);
+}
+
+.statusPill.warn {
+  border-color: rgba(247, 201, 72, 0.38);
+  color: var(--warn);
+  background: rgba(247, 201, 72, 0.08);
+}
+
+.statusPill.bad {
+  border-color: rgba(255, 84, 112, 0.45);
+  color: #ffdce2;
+  background: rgba(255, 84, 112, 0.1);
+}
+
+.statusPill.muted {
+  color: var(--muted);
+  background: #181b1a;
+}
+
 .userCreateGrid {
   display: grid;
   grid-template-columns: minmax(160px, 1fr) minmax(180px, 1fr) 140px auto;
@@ -462,6 +497,18 @@ th {
   font-size: 0.72rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.nodeStatusTable td {
+  white-space: nowrap;
+}
+
+.logSnippet {
+  max-width: 360px;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settingsForm {

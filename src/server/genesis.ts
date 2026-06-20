@@ -27,7 +27,13 @@ function publicPillar(record: PillarRecord): PublicPillar {
     producerAddress: record.producerWallet.address,
     producerIndex: record.producerIndex,
     createdAt: record.createdAt,
-    packageDownloadedAt: record.packageDownloadedAt
+    packageDownloadedAt: record.packageDownloadedAt,
+    nodeStatus: record.nodeStatus
+      ? {
+          latest: record.nodeStatus.latest,
+          historyCount: record.nodeStatus.history.length
+        }
+      : undefined
   };
 }
 

@@ -548,6 +548,112 @@ function PublishedArtifacts({ published }: { published: PublishedArtifactsInfo }
   );
 }
 
+function formatAge(value?: string): string {
+  if (!value) return "No report";
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return "Unknown";
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
+}
+
+function syncStateLabel(value?: number): string {
+  if (value === 1) return "Syncing";
+  if (value === 2) return "Synced";
+  if (value === 0) return "Unknown";
+  return value === undefined ? "Unknown" : String(value);
+}
+
+function heightLag(pillar: PublicPillar): string {
+  const sync = pillar.nodeStatus?.latest?.sync;
+  if (sync?.currentHeight === undefined || sync.targetHeight === undefined) return "-";
+  return String(Math.max(0, sync.targetHeight - sync.currentHeight));
+}
+
+function nodeHealth(pillar: PublicPillar): { label: string; tone: "ok" | "warn" | "bad" | "muted" } {
+  const latest = pillar.nodeStatus?.latest;
+  if (!latest) return { label: "No report", tone: "muted" };
+
+  const ageMs = Date.now() - Date.parse(latest.receivedAt);
+  if (!Number.isNaN(ageMs) && ageMs > 5 * 60 * 1000) return { label: "Stale", tone: "bad" };
+  if (latest.node?.serviceActive === false) return { label: "Service down", tone: "bad" };
+  if ((latest.logs?.errorCountLastMinute ?? 0) > 0) return { label: "Errors", tone: "bad" };
+  if (latest.sync?.state !== undefined && latest.sync.state !== 2) return { label: syncStateLabel(latest.sync.state), tone: "warn" };
+  if (latest.sync?.currentHeight !== undefined && latest.sync.targetHeight !== undefined && latest.sync.targetHeight - latest.sync.currentHeight > 5) {
+    return { label: "Lagging", tone: "warn" };
+  }
+  return { label: "Online", tone: "ok" };
+}
+
+function NodeStatusPanel({ pillars, refresh }: { pillars: PublicPillar[]; refresh: () => Promise<void> }) {
+  return (
+    <section className="panel wide">
+      <div className="panelHeader">
+        <div>
+          <span className="ledger">Telemetry</span>
+          <h2>Node Status</h2>
+        </div>
+        <Button variant="secondary" icon={<RefreshCcw size={18} />} onClick={refresh}>
+          Refresh
+        </Button>
+      </div>
+      <div className="tableWrap">
+        <table className="nodeStatusTable">
+          <thead>
+            <tr>
+              <th>Pillar</th>
+              <th>Health</th>
+              <th>Last Seen</th>
+              <th>Height</th>
+              <th>Lag</th>
+              <th>Sync</th>
+              <th>Peers</th>
+              <th>Version</th>
+              <th>Service</th>
+              <th>Logs</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pillars.map((pillar) => {
+              const latest = pillar.nodeStatus?.latest;
+              const health = nodeHealth(pillar);
+              const recentLogs = latest?.logs?.recent?.join(" | ") ?? "";
+              return (
+                <tr key={pillar.id}>
+                  <td>{pillar.pillarName}</td>
+                  <td>
+                    <span className={`statusPill ${health.tone}`}>{health.label}</span>
+                  </td>
+                  <td className="mono">{formatAge(latest?.receivedAt)}</td>
+                  <td className="mono">{latest?.sync?.currentHeight ?? "-"}</td>
+                  <td className="mono">{heightLag(pillar)}</td>
+                  <td>{syncStateLabel(latest?.sync?.state)}</td>
+                  <td className="mono">{latest?.network?.peerCount ?? "-"}</td>
+                  <td className="mono">{latest?.node?.installedRef ?? "-"}</td>
+                  <td>{latest?.node?.serviceActive === undefined ? "-" : latest.node.serviceActive ? "active" : "down"}</td>
+                  <td>
+                    <span className="mono">
+                      E:{latest?.logs?.errorCountLastMinute ?? 0} W:{latest?.logs?.warningCountLastMinute ?? 0}
+                    </span>
+                    {recentLogs ? (
+                      <div className="logSnippet" title={recentLogs}>
+                        {recentLogs}
+                      </div>
+                    ) : null}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 interface ProbeSeedInput {
   ip: string;
   rpcPort: number;
@@ -812,6 +918,7 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
         onResetPassword={resetUserPassword}
         onDeleteUser={deleteUser}
       />
+      <NodeStatusPanel pillars={session.pillars} refresh={refresh} />
       <section className="panel wide">
         <div className="panelHeader">
           <div>

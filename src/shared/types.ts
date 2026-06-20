@@ -29,6 +29,9 @@ export interface PillarRecord {
   rewardWallet: StoredWallet;
   producerWallet: StoredWallet;
   producerIndex: number;
+  statusTokenHash?: string;
+  statusTokenCipher?: string;
+  nodeStatus?: PillarNodeStatus;
   packageDownloadedAt?: string;
   createdAt: string;
 }
@@ -89,6 +92,7 @@ export interface PublicPillar {
   producerIndex: number;
   createdAt: string;
   packageDownloadedAt?: string;
+  nodeStatus?: PublicNodeStatus;
 }
 
 export interface ReadinessCheck {
@@ -111,6 +115,55 @@ export interface PublishedArtifactsInfo {
   configPath: string;
   chainIdentifier: number;
   seeders: string[];
+}
+
+export interface NodePeerSummary {
+  publicKey?: string;
+  ip?: string;
+  name?: string;
+  version?: string;
+}
+
+export interface NodeStatusReport {
+  eventId?: string;
+  reportedAt?: string;
+  receivedAt: string;
+  remoteAddress?: string;
+  node?: {
+    hostname?: string;
+    serviceActive?: boolean;
+    installedRepo?: string;
+    installedRef?: string;
+    installedCommit?: string;
+    genesisSha256?: string;
+    configSha256?: string;
+  };
+  sync?: {
+    state?: number;
+    currentHeight?: number;
+    targetHeight?: number;
+  };
+  network?: {
+    peerCount?: number;
+    selfPublicKey?: string;
+    selfIp?: string;
+    peers?: NodePeerSummary[];
+  };
+  logs?: {
+    errorCountLastMinute?: number;
+    warningCountLastMinute?: number;
+    recent?: string[];
+  };
+}
+
+export interface PillarNodeStatus {
+  latest?: NodeStatusReport;
+  history: NodeStatusReport[];
+}
+
+export interface PublicNodeStatus {
+  latest?: NodeStatusReport;
+  historyCount: number;
 }
 
 export interface AdminOverview {

@@ -12,6 +12,10 @@ function walletPassword(wallet: StoredWallet): string {
   return decryptText(wallet.passwordCipher);
 }
 
+function statusToken(pillar: PillarRecord): string {
+  return pillar.statusTokenCipher ? decryptText(pillar.statusTokenCipher) : "";
+}
+
 async function walletSeedWords(wallet: StoredWallet): Promise<string> {
   const keyStore = await KeyFile.setPassword(walletPassword(wallet)).decrypt(wallet.keyFile as never);
   return keyStore.mnemonic;
@@ -20,6 +24,7 @@ async function walletSeedWords(wallet: StoredWallet): Promise<string> {
 export async function buildPillarPackage(settings: NetworkSettings, pillar: PillarRecord): Promise<Buffer> {
   const zip = new JSZip();
   const producerPassword = walletPassword(pillar.producerWallet);
+  const nodeStatusToken = statusToken(pillar);
   const [producerSeedWords, pillarSeedWords, rewardSeedWords] = await Promise.all([
     walletSeedWords(pillar.producerWallet),
     walletSeedWords(pillar.pillarWallet),
@@ -34,6 +39,11 @@ export async function buildPillarPackage(settings: NetworkSettings, pillar: Pill
       rewardAddress: pillar.rewardWallet.address,
       producerAddress: pillar.producerWallet.address,
       producerIndex: pillar.producerIndex,
+      nodeStatus: {
+        endpoint: "/api/bootstrap/status",
+        tokenFile: "node/status-token.txt",
+        interval: "1 minute"
+      },
       allocations: {
         pillarAddress: {
           znn: "50000",
@@ -59,6 +69,39 @@ export async function buildPillarPackage(settings: NetworkSettings, pillar: Pill
   zip.file("wallets/reward.json", pretty(pillar.rewardWallet.keyFile));
   zip.file("wallets/reward-password.txt", `${walletPassword(pillar.rewardWallet)}\n`);
   zip.file("wallets/reward-seed-words.txt", `${rewardSeedWords}\n`);
+  zip.file("node/status-token.txt", `${nodeStatusToken}\n`);
+  zip.file(
+    "node/status-report-example.sh",
+    `#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_URL="\${BASE_URL:-https://testnet.example.com}"
+TOKEN="\${ZNN_STATUS_TOKEN:-$(cat ./node/status-token.txt)}"
+
+curl -fsS -X POST "$BASE_URL/api/bootstrap/status" \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "node": {
+      "hostname": "'"$(hostname)"'",
+      "serviceActive": true
+    },
+    "sync": {
+      "state": 2,
+      "currentHeight": 0,
+      "targetHeight": 0
+    },
+    "network": {
+      "peerCount": 0
+    },
+    "logs": {
+      "errorCountLastMinute": 0,
+      "warningCountLastMinute": 0,
+      "recent": []
+    }
+  }'
+`
+  );
   zip.file(
     "wallets/seed-words.json",
     pretty({

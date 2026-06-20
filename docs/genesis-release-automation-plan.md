@@ -148,6 +148,8 @@ POST /api/bootstrap/status
 
 The token should authorize only one pillar for one genesis event. The admin and operator should be able to rotate or revoke it.
 
+The first implemented slice uses a pillar-scoped node status token in the operator ZIP package. That token authorizes `POST /api/bootstrap/status` and `POST /api/node/status`. The richer bootstrap token model can reuse or replace this token when the full install script lands.
+
 ### Bootstrap Manifest
 
 The authenticated manifest combines public network info with pillar-specific artifact URLs.
@@ -234,6 +236,96 @@ State should include:
 - last successful run
 - last error
 
+## Node Status Reporting
+
+Each pillar node should push a heartbeat to the orchestrator every minute. The orchestrator should not rely on inbound RPC access to every node because operators may run behind firewalls or NAT.
+
+The node agent should collect:
+
+- `stats.syncInfo`
+  - `state`
+  - `currentHeight`
+  - `targetHeight`
+- `stats.networkInfo`
+  - self public key
+  - peer count
+  - known peer names or versions when available
+- local service information
+  - `systemctl is-active go-zenon`
+  - installed repo/ref/commit
+  - current genesis/config hashes
+- recent log summary
+  - error count
+  - warning count
+  - capped recent matching lines
+
+Heartbeat endpoint:
+
+```text
+POST /api/bootstrap/status
+Authorization: Bearer <pillar-status-token>
+```
+
+Example payload:
+
+```json
+{
+  "eventId": "devnet-2026-06",
+  "reportedAt": "2026-06-20T18:00:00Z",
+  "node": {
+    "hostname": "pillar-node-1",
+    "serviceActive": true,
+    "installedRepo": "https://github.com/zenon-network/go-zenon.git",
+    "installedRef": "devnet-v1.0.0-rc1",
+    "installedCommit": "optional-commit",
+    "genesisSha256": "abc...",
+    "configSha256": "def..."
+  },
+  "sync": {
+    "state": 2,
+    "currentHeight": 12345,
+    "targetHeight": 12345
+  },
+  "network": {
+    "peerCount": 4,
+    "selfPublicKey": "...",
+    "selfIp": "203.0.113.10"
+  },
+  "logs": {
+    "errorCountLastMinute": 0,
+    "warningCountLastMinute": 1,
+    "recent": []
+  }
+}
+```
+
+The server should keep:
+
+- latest full report per pillar
+- rolling minute-sample history per pillar
+- stale status derived from `receivedAt`
+
+The admin panel should show:
+
+- last seen
+- installed ref versus expected ref
+- service active/down
+- current height
+- height lag
+- sync state
+- peer count
+- recent error and warning counts
+- recent log snippets
+
+For the first implementation, the operator package includes:
+
+```text
+node/status-token.txt
+node/status-report-example.sh
+```
+
+The full agent should later replace the example script with automatic RPC collection and log parsing.
+
 ## Config Rules
 
 There are two config types:
@@ -296,6 +388,21 @@ Add per-pillar controls:
 - last node poll timestamp
 - last node-reported version
 - last node-reported error
+
+### Node Telemetry
+
+Add per-pillar status controls and displays:
+
+- current health
+- last heartbeat
+- reported height
+- height lag
+- sync status
+- peer count
+- installed `go-zenon` repo/ref
+- recent error and warning counts
+- recent log snippet
+- stale or unresponsive marker
 
 ## Historical Artifact Retention
 
@@ -364,6 +471,36 @@ interface BootstrapToken {
   revokedAt?: string;
 }
 
+interface NodeStatusReport {
+  eventId?: string;
+  reportedAt?: string;
+  receivedAt: string;
+  node?: {
+    hostname?: string;
+    serviceActive?: boolean;
+    installedRepo?: string;
+    installedRef?: string;
+    installedCommit?: string;
+    genesisSha256?: string;
+    configSha256?: string;
+  };
+  sync?: {
+    state?: number;
+    currentHeight?: number;
+    targetHeight?: number;
+  };
+  network?: {
+    peerCount?: number;
+    selfPublicKey?: string;
+    selfIp?: string;
+  };
+  logs?: {
+    errorCountLastMinute?: number;
+    warningCountLastMinute?: number;
+    recent?: string[];
+  };
+}
+
 interface PublishedEventArtifacts {
   genesis: unknown;
   config: unknown;
@@ -399,6 +536,7 @@ interface PublishedEventArtifacts {
 - Download artifacts and call `hypercore-one/deployment`.
 - Store local state to avoid repeated upgrades.
 - Report status back to the control panel.
+- Collect `stats.syncInfo`, `stats.networkInfo`, local service state, and capped recent log errors.
 
 ### Phase 4: Rollout Safety
 

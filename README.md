@@ -254,8 +254,46 @@ Each operator downloads a ZIP containing:
 - encrypted keyfiles for producer, pillar, and reward wallets
 - wallet passwords
 - seed words for producer, pillar, and reward wallets
+- `node/status-token.txt` for authenticated node status reporting
+- `node/status-report-example.sh` with a minimal heartbeat POST example
 
 The package `config.json` is pillar-specific and includes the producer settings. The public `/config.json` is a generic non-producing node config.
+
+## Node Status Reporting
+
+Each registered pillar receives a private node status token in its operator package. A node agent can use that token to report health back to the orchestrator without exposing the app username or password.
+
+Heartbeat reports are sent with a bearer token:
+
+```bash
+curl -fsS -X POST "https://<TESTNET_HOST>/api/bootstrap/status" \
+  -H "Authorization: Bearer <node-status-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "node": {
+      "hostname": "pillar-node-1",
+      "serviceActive": true,
+      "installedRepo": "https://github.com/zenon-network/go-zenon.git",
+      "installedRef": "devnet-v1.0.0-rc1"
+    },
+    "sync": {
+      "state": 2,
+      "currentHeight": 12345,
+      "targetHeight": 12345
+    },
+    "network": {
+      "peerCount": 4,
+      "selfPublicKey": "..."
+    },
+    "logs": {
+      "errorCountLastMinute": 0,
+      "warningCountLastMinute": 0,
+      "recent": []
+    }
+  }'
+```
+
+The admin panel shows the latest report for each pillar, including last seen time, service status, sync height, height lag, peer count, installed ref, and recent log error counts. The server keeps a rolling 24-hour minute-sample history per pillar and the latest full report.
 
 ## Published Files
 
@@ -355,3 +393,8 @@ Admin-only downloads:
 Operator download:
 
 - `GET /api/pillar/package`
+
+Node heartbeat reporting:
+
+- `POST /api/bootstrap/status`
+- `POST /api/node/status`

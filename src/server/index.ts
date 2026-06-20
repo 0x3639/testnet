@@ -4,17 +4,18 @@ import path from "node:path";
 import { z } from "zod";
 import { clearSessionCookie, login, logout, requireAuth, sessionTokenFromRequest, setSessionCookie, type AuthedRequest } from "./auth.js";
 import { createAccount, resetAccountPassword } from "./accounts.js";
-import { randomId } from "./crypto.js";
+import { encryptText, randomId, sha256 } from "./crypto.js";
 import { buildGenesis, buildNodeConfig, readiness, toPublicPillar } from "./genesis.js";
 import { buildPillarPackage, buildSporkPackage } from "./packages.js";
 import { probeSeedNode, validateSeedNodeIp } from "./seeders.js";
 import { readState, updateState } from "./storage.js";
 import { createWallet, toStoredWallet } from "./wallets.js";
-import type { AppState, ManagedUser, NetworkSettings, PublishedArtifacts, PublishedArtifactsInfo, PublicNetworkSettings } from "../shared/types.js";
+import type { AppState, ManagedUser, NetworkSettings, NodeStatusReport, PillarRecord, PublishedArtifacts, PublishedArtifactsInfo, PublicNetworkSettings } from "../shared/types.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const PUBLIC_GENESIS_PATH = "/genesis.json";
 const PUBLIC_CONFIG_PATH = "/config.json";
+const NODE_STATUS_HISTORY_LIMIT = 24 * 60;
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -73,6 +74,56 @@ const seedNodeProbeSchema = z.object({
   p2pPort: z.number().int().min(1).max(65535).default(35995)
 });
 
+const optionalShortText = z.string().trim().max(256).optional();
+
+const nodeStatusReportSchema = z.object({
+  eventId: z.string().trim().max(120).optional(),
+  reportedAt: z.string().trim().max(80).optional(),
+  node: z
+    .object({
+      hostname: optionalShortText,
+      serviceActive: z.boolean().optional(),
+      installedRepo: z.string().trim().max(300).optional(),
+      installedRef: optionalShortText,
+      installedCommit: optionalShortText,
+      genesisSha256: optionalShortText,
+      configSha256: optionalShortText
+    })
+    .optional(),
+  sync: z
+    .object({
+      state: z.number().int().min(0).max(10).optional(),
+      currentHeight: z.number().int().min(0).optional(),
+      targetHeight: z.number().int().min(0).optional()
+    })
+    .optional(),
+  network: z
+    .object({
+      peerCount: z.number().int().min(0).max(10000).optional(),
+      selfPublicKey: z.string().trim().max(256).optional(),
+      selfIp: z.string().trim().max(128).optional(),
+      peers: z
+        .array(
+          z.object({
+            publicKey: z.string().trim().max(256).optional(),
+            ip: z.string().trim().max(128).optional(),
+            name: z.string().trim().max(128).optional(),
+            version: z.string().trim().max(128).optional()
+          })
+        )
+        .max(100)
+        .optional()
+    })
+    .optional(),
+  logs: z
+    .object({
+      errorCountLastMinute: z.number().int().min(0).max(10000).optional(),
+      warningCountLastMinute: z.number().int().min(0).max(10000).optional(),
+      recent: z.array(z.string().max(500)).max(20).optional()
+    })
+    .optional()
+});
+
 function publicSettings(settings: NetworkSettings): PublicNetworkSettings {
   const { sporkWallet, ...rest } = settings;
   return {
@@ -102,6 +153,27 @@ async function ensureSporkWallet(): Promise<void> {
   });
 }
 
+function createStatusTokenFields(): Pick<PillarRecord, "statusTokenHash" | "statusTokenCipher"> {
+  const token = randomId(32);
+  return {
+    statusTokenHash: sha256(token),
+    statusTokenCipher: encryptText(token)
+  };
+}
+
+function ensureStatusToken(pillar: PillarRecord): void {
+  if (pillar.statusTokenHash && pillar.statusTokenCipher) return;
+  Object.assign(pillar, createStatusTokenFields());
+}
+
+async function ensurePillarStatusTokens(): Promise<void> {
+  await updateState((state) => {
+    for (const pillar of state.pillars) {
+      ensureStatusToken(pillar);
+    }
+  });
+}
+
 async function createPillar(userId: string, pillarName: string) {
   const [pillarWallet, rewardWallet, producerWallet] = await Promise.all([createWallet(), createWallet(), createWallet()]);
   return updateState((state) => {
@@ -120,6 +192,7 @@ async function createPillar(userId: string, pillarName: string) {
       rewardWallet: toStoredWallet(rewardWallet),
       producerWallet: toStoredWallet(producerWallet),
       producerIndex: 0,
+      ...createStatusTokenFields(),
       createdAt: new Date().toISOString()
     };
     state.pillars.push(record);
@@ -155,8 +228,70 @@ function publishedInfo(published?: PublishedArtifacts): PublishedArtifactsInfo |
   };
 }
 
+function bearerToken(request: express.Request): string | undefined {
+  const header = request.get("authorization");
+  if (!header?.toLowerCase().startsWith("bearer ")) return undefined;
+  const token = header.slice("bearer ".length).trim();
+  return token || undefined;
+}
+
+function historySample(report: NodeStatusReport): NodeStatusReport {
+  return {
+    ...report,
+    logs: report.logs
+      ? {
+          errorCountLastMinute: report.logs.errorCountLastMinute,
+          warningCountLastMinute: report.logs.warningCountLastMinute
+        }
+      : undefined
+  };
+}
+
+async function receiveNodeStatus(request: express.Request, response: express.Response): Promise<void> {
+  const token = bearerToken(request);
+  if (!token) {
+    response.status(401).json({ error: "Missing bearer token" });
+    return;
+  }
+
+  const parsed = nodeStatusReportSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid node status report" });
+    return;
+  }
+
+  const tokenHash = sha256(token);
+  try {
+    const result = await updateState((state) => {
+      const pillar = state.pillars.find((candidate) => candidate.statusTokenHash === tokenHash);
+      if (!pillar) throw new Error("Invalid node status token");
+
+      const latest: NodeStatusReport = {
+        ...parsed.data,
+        receivedAt: new Date().toISOString(),
+        remoteAddress: request.ip
+      };
+
+      const history = [...(pillar.nodeStatus?.history ?? []), historySample(latest)].slice(-NODE_STATUS_HISTORY_LIMIT);
+      pillar.nodeStatus = {
+        latest,
+        history
+      };
+
+      return {
+        pillarName: pillar.pillarName,
+        receivedAt: latest.receivedAt
+      };
+    });
+    response.json({ ok: true, ...result });
+  } catch (error: unknown) {
+    response.status(401).json({ error: (error as Error).message });
+  }
+}
+
 async function main() {
   await ensureSporkWallet();
+  await ensurePillarStatusTokens();
 
   const app = express();
   app.disable("x-powered-by");
@@ -184,6 +319,9 @@ async function main() {
     }
     sendJsonFile(response, state.publishedArtifacts.config);
   });
+
+  app.post("/api/bootstrap/status", receiveNodeStatus);
+  app.post("/api/node/status", receiveNodeStatus);
 
   app.post("/api/auth/login", async (request, response) => {
     const parsed = loginSchema.safeParse(request.body);
