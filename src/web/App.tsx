@@ -656,7 +656,6 @@ function PublishedArtifacts({ published }: { published: PublishedArtifactsInfo }
   const genesisUrl = publicUrl(published.genesisPath);
   const configUrl = publicUrl(published.configPath);
   const nodePlanUrl = published.nodePlanPath ? publicUrl(published.nodePlanPath) : "";
-  const wgetCommands = [`wget ${genesisUrl}`, `wget ${configUrl}`, nodePlanUrl ? `wget ${nodePlanUrl}` : ""].filter(Boolean).join("\n");
 
   return (
     <div className="publishedBlock">
@@ -672,9 +671,6 @@ function PublishedArtifacts({ published }: { published: PublishedArtifactsInfo }
           {published.actions?.applyAt ? <span className="statusPill warn">Apply {formatUtc(published.actions.applyAt)}</span> : null}
           {published.release ? <span className="mono mutedText">{published.release.goZenon.ref}</span> : null}
           {published.actions?.wipeData ? <span className="statusPill warn">Wipe data</span> : null}
-          <Button variant="secondary" icon={<Copy size={18} />} onClick={() => copy(wgetCommands)}>
-            Copy wget
-          </Button>
         </div>
       </div>
       <div className="publishedRows">
