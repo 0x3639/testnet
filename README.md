@@ -19,6 +19,10 @@ The backend is Node/Express. The frontend is React/Vite and follows the dark, co
 - Admin user and pillar deletion.
 - A local four-node devnet generation script for validating the produced genesis/config artifacts.
 
+## Planning Docs
+
+- [Genesis release automation plan](docs/genesis-release-automation-plan.md): proposed event history, configurable `go-zenon` release targets, operator-specific bootstrap scripts, and node polling automation.
+
 ## Important Security Notes
 
 Set `APP_SECRET` before using the app outside local testing. It is used as the server-side encryption key for sensitive stored wallet package secrets, especially wallet passwords.
