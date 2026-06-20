@@ -15,7 +15,7 @@ import {
   TriangleAlert,
   UserPlus
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AdminOverview,
   AuthUser,
@@ -31,6 +31,7 @@ import type {
 } from "../shared/types";
 
 type Session = UserOverview | AdminOverview;
+type RefreshState = "idle" | "refreshing" | "updated" | "error";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -153,6 +154,21 @@ function Button({
       {icon}
       <span>{children}</span>
     </button>
+  );
+}
+
+function RefreshButton({ refresh, state }: { refresh: () => Promise<void>; state: RefreshState }) {
+  const label =
+    state === "refreshing" ? "Refreshing" : state === "updated" ? "Updated" : state === "error" ? "Failed" : "Refresh";
+  return (
+    <Button
+      variant="secondary"
+      icon={<RefreshCcw className={state === "refreshing" ? "spinIcon" : undefined} size={18} />}
+      onClick={() => void refresh().catch(() => undefined)}
+      disabled={state === "refreshing"}
+    >
+      {label}
+    </Button>
   );
 }
 
@@ -803,7 +819,7 @@ function nodeHealth(node: TelemetryNode): { label: string; tone: "ok" | "warn" |
   return { label: "Online", tone: "ok" };
 }
 
-function NodeStatusPanel({ nodes, refresh }: { nodes: TelemetryNode[]; refresh: () => Promise<void> }) {
+function NodeStatusPanel({ nodes, refresh, refreshState }: { nodes: TelemetryNode[]; refresh: () => Promise<void>; refreshState: RefreshState }) {
   return (
     <section className="panel wide">
       <div className="panelHeader">
@@ -811,9 +827,7 @@ function NodeStatusPanel({ nodes, refresh }: { nodes: TelemetryNode[]; refresh: 
           <span className="ledger">Telemetry</span>
           <h2>Node Status</h2>
         </div>
-        <Button variant="secondary" icon={<RefreshCcw size={18} />} onClick={refresh}>
-          Refresh
-        </Button>
+        <RefreshButton refresh={refresh} state={refreshState} />
       </div>
       <div className="tableWrap">
         <table className="nodeStatusTable">
@@ -1145,7 +1159,7 @@ function SettingsForm({
   );
 }
 
-function AdminView({ session, refresh }: { session: AdminOverview; refresh: () => Promise<void> }) {
+function AdminView({ session, refresh, refreshState }: { session: AdminOverview; refresh: () => Promise<void>; refreshState: RefreshState }) {
   const [tab, setTab] = useState<"genesis" | "config">("genesis");
   const json = useMemo(() => JSON.stringify(tab === "genesis" ? session.genesis : session.configTemplate, null, 2), [session, tab]);
   const telemetryNodes: TelemetryNode[] = useMemo(
@@ -1325,7 +1339,7 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
         onResetPassword={resetUserPassword}
         onDeleteUser={deleteUser}
       />
-      <NodeStatusPanel nodes={telemetryNodes} refresh={refresh} />
+      <NodeStatusPanel nodes={telemetryNodes} refresh={refresh} refreshState={refreshState} />
       <section className="panel wide">
         <div className="panelHeader">
           <div>
@@ -1333,9 +1347,7 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
             <h2>{session.pillars.length} Registered</h2>
           </div>
           <div className="toolbar">
-            <Button variant="secondary" icon={<RefreshCcw size={18} />} onClick={refresh}>
-              Refresh
-            </Button>
+            <RefreshButton refresh={refresh} state={refreshState} />
             <Button variant="secondary" icon={<KeyRound size={18} />} onClick={() => download("/api/admin/spork-package.zip")}>
               Spork Wallet
             </Button>
@@ -1384,9 +1396,7 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
             <span className="ledger">Seed Nodes</span>
             <h2>{session.seedNodes.length} Managed</h2>
           </div>
-          <Button variant="secondary" icon={<RefreshCcw size={18} />} onClick={refresh}>
-            Refresh
-          </Button>
+          <RefreshButton refresh={refresh} state={refreshState} />
         </div>
         <form className="seedCreateGrid" onSubmit={createManagedSeedNode}>
           <label>
@@ -1514,6 +1524,8 @@ function AdminView({ session, refresh }: { session: AdminOverview; refresh: () =
 export function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshState, setRefreshState] = useState<RefreshState>("idle");
+  const refreshSequence = useRef(0);
 
   async function loadCurrentSession(role?: Role): Promise<Session> {
     if (role === "admin") return api<AdminOverview>("/api/admin/overview");
@@ -1521,7 +1533,22 @@ export function App() {
   }
 
   async function refresh() {
-    setSession(await loadCurrentSession(session?.user.role));
+    const sequence = refreshSequence.current + 1;
+    refreshSequence.current = sequence;
+    setRefreshState("refreshing");
+    try {
+      setSession(await loadCurrentSession(session?.user.role));
+      setRefreshState("updated");
+      window.setTimeout(() => {
+        if (refreshSequence.current === sequence) setRefreshState("idle");
+      }, 1200);
+    } catch (error) {
+      setRefreshState("error");
+      window.setTimeout(() => {
+        if (refreshSequence.current === sequence) setRefreshState("idle");
+      }, 1600);
+      throw error;
+    }
   }
 
   useEffect(() => {
@@ -1559,7 +1586,7 @@ export function App() {
   return (
     <Shell user={session.user} onLogout={logout}>
       {session.user.role === "admin" ? (
-        <AdminView session={session as AdminOverview} refresh={refresh} />
+        <AdminView session={session as AdminOverview} refresh={refresh} refreshState={refreshState} />
       ) : (
         <OperatorView session={session as UserOverview} refresh={refresh} />
       )}

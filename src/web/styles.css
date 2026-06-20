@@ -170,6 +170,16 @@ textarea {
   background: rgba(255, 84, 112, 0.1);
 }
 
+.spinIcon {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .appShell {
   display: grid;
   grid-template-columns: 260px 1fr;
