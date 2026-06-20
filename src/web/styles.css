@@ -308,6 +308,20 @@ textarea {
   margin-top: 14px;
 }
 
+.bootstrapBlock {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  margin-top: 18px;
+  padding-top: 18px;
+}
+
+.commandBlock {
+  max-height: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .amountRow {
   display: grid;
   grid-template-columns: 1fr auto auto;

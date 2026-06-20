@@ -11,6 +11,10 @@ services:
       DATA_DIR: /app/data
       APP_SECRET: ${APP_SECRET:?Set APP_SECRET in the Portainer stack environment}
       COOKIE_SECURE: "true"
+      GO_ZENON_REPO: ${GO_ZENON_REPO:-https://github.com/zenon-network/go-zenon.git}
+      GO_ZENON_REF: ${GO_ZENON_REF:-master}
+      DEPLOYMENT_REPO: ${DEPLOYMENT_REPO:-https://github.com/hypercore-one/deployment.git}
+      DEPLOYMENT_REF: ${DEPLOYMENT_REF:-main}
     volumes:
       - zenon_testnet_builder_data:/app/data
     expose:

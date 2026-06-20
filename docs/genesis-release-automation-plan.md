@@ -138,17 +138,18 @@ Do not embed the operator's website username and password in the script. Instead
 Suggested endpoints:
 
 ```text
-GET /api/bootstrap/install.sh?token=...
+GET /api/bootstrap/install.sh
 GET /api/bootstrap/manifest
 GET /api/bootstrap/pillar-config.json
 GET /api/bootstrap/producer.json
 GET /api/bootstrap/producer-password.txt
+GET /node-plan.json
 POST /api/bootstrap/status
 ```
 
 The token should authorize only one pillar for one genesis event. The admin and operator should be able to rotate or revoke it.
 
-The first implemented slice uses a pillar-scoped node status token in the operator ZIP package. That token authorizes `POST /api/bootstrap/status` and `POST /api/node/status`. The richer bootstrap token model can reuse or replace this token when the full install script lands.
+The first implemented slice uses a pillar-scoped bootstrap/status token in the operator ZIP package and operator page. That token authorizes `GET /api/bootstrap/manifest`, the pillar-specific config and producer download endpoints, `POST /api/bootstrap/status`, and `POST /api/node/status`.
 
 ### Bootstrap Manifest
 
@@ -185,23 +186,24 @@ Example:
 The operator page should show a command similar to:
 
 ```bash
-curl -fsSL "https://testnet.zenon.info/api/bootstrap/install.sh?token=<token>" | sudo bash
+curl -fsSL "https://testnet.zenon.info/api/bootstrap/install.sh" | sudo env ZNN_BOOTSTRAP_TOKEN="<token>" ZNN_TESTNET_URL="https://testnet.zenon.info" bash
 ```
 
-The script should:
+The implemented first-pass script:
 
 1. Require root.
-2. Detect supported Linux architecture.
-3. Install basic dependencies if missing.
-4. Create `/root/.znn` and `/root/.znn/wallet`.
-5. Download the authenticated bootstrap manifest.
-6. Download and verify `genesis.json`.
-7. Download the pillar-specific `config.json`.
-8. Download the producer keyfile and password.
-9. Write files with strict permissions.
-10. Clone or update `hypercore-one/deployment`.
-11. Install a cron job or systemd timer for polling.
-12. Run the deployment script when the node plan indicates an actionable release.
+2. Install basic dependencies if missing.
+3. Download the authenticated bootstrap manifest.
+4. Clone `hypercore-one/deployment`.
+5. Run the deployment script to build and install go-zenon.
+6. Stop `go-zenon`.
+7. Create `/root/.znn` and `/root/.znn/wallet`.
+8. Download `genesis.json`.
+9. Download the pillar-specific `config.json`.
+10. Download the producer keyfile and password.
+11. Write files with strict permissions.
+12. Install a one-minute cron job for status reporting.
+13. Restart `go-zenon` and send an initial status report.
 
 The deployment repo already supports non-interactive deployment:
 
@@ -211,12 +213,12 @@ sudo ./zenon.sh --deploy zenon "$GO_ZENON_REPO" "$GO_ZENON_REF"
 
 ## Cron Or Timer Polling
 
-The node should poll every 10 minutes. Use a lock so only one run can execute at a time.
+The first implemented script reports status every minute. The future upgrade poller should poll the release plan every 10 minutes. Use a lock so only one run can execute at a time.
 
 Cron shape:
 
 ```cron
-*/10 * * * * flock -n /var/lock/znn-testnet-agent.lock /usr/local/bin/znn-testnet-agent
+*/1 * * * * root flock -n /var/lock/znn-testnet-agent.lock /usr/local/bin/znn-testnet-agent
 ```
 
 The agent should store local state:
@@ -317,14 +319,16 @@ The admin panel should show:
 - recent error and warning counts
 - recent log snippets
 
-For the first implementation, the operator package includes:
+For the first implementation, the operator package and bootstrap script include:
 
 ```text
 node/status-token.txt
 node/status-report-example.sh
+/usr/local/bin/znn-testnet-agent
+/etc/cron.d/znn-testnet-agent
 ```
 
-The full agent should later replace the example script with automatic RPC collection and log parsing.
+The installed agent collects `stats.syncInfo`, `stats.networkInfo`, local systemd service state, and capped recent log warnings/errors.
 
 ## Config Rules
 
@@ -523,20 +527,21 @@ interface PublishedEventArtifacts {
 
 ### Phase 2: Operator Bootstrap
 
-- Add per-pillar bootstrap tokens.
-- Add authenticated bootstrap manifest endpoint.
-- Add authenticated producer config/keyfile/password endpoints.
-- Add generated install script.
-- Add operator UI copy command.
+- Add per-pillar bootstrap tokens. Done for the first-pass reusable token.
+- Add authenticated bootstrap manifest endpoint. Done.
+- Add authenticated producer config/keyfile/password endpoints. Done.
+- Add generated install script. Done.
+- Add operator UI copy command. Done.
 
 ### Phase 3: Node Agent
 
-- Add node-side polling script.
-- Install cron or systemd timer.
-- Download artifacts and call `hypercore-one/deployment`.
-- Store local state to avoid repeated upgrades.
-- Report status back to the control panel.
-- Collect `stats.syncInfo`, `stats.networkInfo`, local service state, and capped recent log errors.
+- Add node-side status script. Done.
+- Install cron or systemd timer. Done with cron.
+- Download artifacts and call `hypercore-one/deployment`. Done for initial bootstrap.
+- Store local state to avoid repeated upgrades. Pending.
+- Add release-plan polling and idempotent upgrades. Pending.
+- Report status back to the control panel. Done.
+- Collect `stats.syncInfo`, `stats.networkInfo`, local service state, and capped recent log errors. Done.
 
 ### Phase 4: Rollout Safety
 

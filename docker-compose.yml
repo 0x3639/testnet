@@ -6,6 +6,10 @@ services:
       APP_SECRET: ${APP_SECRET:?Set APP_SECRET before starting the stack}
       DATA_DIR: /app/data
       PORT: 8787
+      GO_ZENON_REPO: ${GO_ZENON_REPO:-https://github.com/zenon-network/go-zenon.git}
+      GO_ZENON_REF: ${GO_ZENON_REF:-master}
+      DEPLOYMENT_REPO: ${DEPLOYMENT_REPO:-https://github.com/hypercore-one/deployment.git}
+      DEPLOYMENT_REF: ${DEPLOYMENT_REF:-main}
     volumes:
       - testnet-data:/app/data
 

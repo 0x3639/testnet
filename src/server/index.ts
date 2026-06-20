@@ -4,7 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { clearSessionCookie, login, logout, requireAuth, sessionTokenFromRequest, setSessionCookie, type AuthedRequest } from "./auth.js";
 import { createAccount, resetAccountPassword } from "./accounts.js";
-import { encryptText, randomId, sha256 } from "./crypto.js";
+import { decryptText, encryptText, randomId, sha256 } from "./crypto.js";
 import { buildGenesis, buildNodeConfig, readiness, toPublicPillar } from "./genesis.js";
 import { buildPillarPackage, buildSporkPackage } from "./packages.js";
 import { probeSeedNode, validateSeedNodeIp } from "./seeders.js";
@@ -15,7 +15,13 @@ import type { AppState, ManagedUser, NetworkSettings, NodeStatusReport, PillarRe
 const PORT = Number(process.env.PORT ?? 8787);
 const PUBLIC_GENESIS_PATH = "/genesis.json";
 const PUBLIC_CONFIG_PATH = "/config.json";
+const PUBLIC_NODE_PLAN_PATH = "/node-plan.json";
 const NODE_STATUS_HISTORY_LIMIT = 24 * 60;
+const DEFAULT_GO_ZENON_REPO = process.env.GO_ZENON_REPO ?? "https://github.com/zenon-network/go-zenon.git";
+const DEFAULT_GO_ZENON_REF = process.env.GO_ZENON_REF ?? "master";
+const DEFAULT_GO_ZENON_COMMIT = process.env.GO_ZENON_COMMIT;
+const DEFAULT_DEPLOYMENT_REPO = process.env.DEPLOYMENT_REPO ?? "https://github.com/hypercore-one/deployment.git";
+const DEFAULT_DEPLOYMENT_REF = process.env.DEPLOYMENT_REF ?? "main";
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -228,11 +234,262 @@ function publishedInfo(published?: PublishedArtifacts): PublishedArtifactsInfo |
   };
 }
 
+function requestOrigin(request: express.Request): string {
+  const forwardedProto = request.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const forwardedHost = request.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const proto = forwardedProto || request.protocol;
+  const host = forwardedHost || request.get("host") || `127.0.0.1:${PORT}`;
+  return `${proto}://${host}`;
+}
+
+function statusToken(pillar: PillarRecord): string {
+  return pillar.statusTokenCipher ? decryptText(pillar.statusTokenCipher) : "";
+}
+
+function producerPassword(pillar: PillarRecord): string {
+  return decryptText(pillar.producerWallet.passwordCipher);
+}
+
 function bearerToken(request: express.Request): string | undefined {
   const header = request.get("authorization");
   if (!header?.toLowerCase().startsWith("bearer ")) return undefined;
   const token = header.slice("bearer ".length).trim();
   return token || undefined;
+}
+
+function pillarConfigForDeployment(settings: NetworkSettings, pillar: PillarRecord): unknown {
+  return buildNodeConfig(settings, pillar, producerPassword(pillar), {
+    dataPath: "/root/.znn",
+    walletPath: "/root/.znn/wallet",
+    genesisFile: "/root/.znn/genesis.json",
+    producerKeyFilePath: "/root/.znn/wallet/producer.json"
+  });
+}
+
+function releaseTarget() {
+  return {
+    goZenon: {
+      repoUrl: DEFAULT_GO_ZENON_REPO,
+      ref: DEFAULT_GO_ZENON_REF,
+      commit: DEFAULT_GO_ZENON_COMMIT
+    },
+    deployment: {
+      repoUrl: DEFAULT_DEPLOYMENT_REPO,
+      ref: DEFAULT_DEPLOYMENT_REF
+    }
+  };
+}
+
+function nodePlan(state: AppState) {
+  return {
+    schemaVersion: 1,
+    eventId: state.publishedArtifacts?.publishedAt ?? state.finalizedGenesis?.finalizedAt ?? "draft",
+    publishedAt: state.publishedArtifacts?.publishedAt,
+    finalizedAt: state.finalizedGenesis?.finalizedAt,
+    ...releaseTarget()
+  };
+}
+
+function bootstrapManifest(request: express.Request, state: AppState, pillar: PillarRecord) {
+  const origin = requestOrigin(request);
+  return {
+    schemaVersion: 1,
+    eventId: state.publishedArtifacts?.publishedAt ?? state.finalizedGenesis?.finalizedAt ?? "draft",
+    pillarName: pillar.pillarName,
+    pillarAddress: pillar.pillarWallet.address,
+    rewardAddress: pillar.rewardWallet.address,
+    producerAddress: pillar.producerWallet.address,
+    genesisUrl: `${origin}${PUBLIC_GENESIS_PATH}`,
+    configUrl: `${origin}/api/bootstrap/pillar-config.json`,
+    producerKeyFileUrl: `${origin}/api/bootstrap/producer.json`,
+    producerPasswordUrl: `${origin}/api/bootstrap/producer-password.txt`,
+    nodePlanUrl: `${origin}${PUBLIC_NODE_PLAN_PATH}`,
+    statusUrl: `${origin}/api/bootstrap/status`,
+    ...releaseTarget()
+  };
+}
+
+async function withBootstrapPillar(
+  request: express.Request,
+  response: express.Response,
+  handler: (state: AppState, pillar: PillarRecord) => Promise<void> | void
+): Promise<void> {
+  const token = bearerToken(request);
+  if (!token) {
+    response.status(401).json({ error: "Missing bearer token" });
+    return;
+  }
+
+  const tokenHash = sha256(token);
+  const state = await readState();
+  const pillar = state.pillars.find((candidate) => candidate.statusTokenHash === tokenHash);
+  if (!pillar) {
+    response.status(401).json({ error: "Invalid bootstrap token" });
+    return;
+  }
+
+  await handler(state, pillar);
+}
+
+function bootstrapInstallScript(origin: string): string {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$EUID" -ne 0 ]]; then
+  echo "Run this script as root, usually via sudo." >&2
+  exit 1
+fi
+
+: "\${ZNN_BOOTSTRAP_TOKEN:?Set ZNN_BOOTSTRAP_TOKEN to the pillar bootstrap token from the testnet builder.}"
+
+BASE_URL="\${ZNN_TESTNET_URL:-${origin}}"
+ZNN_DIR="\${ZNN_DIR:-/root/.znn}"
+DEPLOYMENT_DIR="\${ZNN_DEPLOYMENT_DIR:-/opt/zenon-deployment}"
+SERVICE_NAME="\${ZNN_SERVICE_NAME:-go-zenon}"
+RPC_URL="\${ZNN_RPC_URL:-http://127.0.0.1:35997}"
+
+if command -v apt-get >/dev/null 2>&1; then
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git jq
+fi
+
+api() {
+  curl -fsSL -H "Authorization: Bearer \${ZNN_BOOTSTRAP_TOKEN}" "$1"
+}
+
+manifest="$(api "\${BASE_URL}/api/bootstrap/manifest")"
+go_repo="$(printf '%s' "$manifest" | jq -r '.goZenon.repoUrl')"
+go_ref="$(printf '%s' "$manifest" | jq -r '.goZenon.ref')"
+deployment_repo="$(printf '%s' "$manifest" | jq -r '.deployment.repoUrl')"
+deployment_ref="$(printf '%s' "$manifest" | jq -r '.deployment.ref')"
+genesis_url="$(printf '%s' "$manifest" | jq -r '.genesisUrl')"
+config_url="$(printf '%s' "$manifest" | jq -r '.configUrl')"
+producer_url="$(printf '%s' "$manifest" | jq -r '.producerKeyFileUrl')"
+producer_password_url="$(printf '%s' "$manifest" | jq -r '.producerPasswordUrl')"
+
+rm -rf "$DEPLOYMENT_DIR"
+git clone --depth 1 --branch "$deployment_ref" "$deployment_repo" "$DEPLOYMENT_DIR"
+chmod +x "$DEPLOYMENT_DIR/zenon.sh"
+
+cd "$DEPLOYMENT_DIR"
+./zenon.sh --deploy zenon "$go_repo" "$go_ref"
+
+systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+
+mkdir -p "$ZNN_DIR/wallet"
+api "$genesis_url" > "$ZNN_DIR/genesis.json"
+api "$config_url" > "$ZNN_DIR/config.json"
+api "$producer_url" > "$ZNN_DIR/wallet/producer.json"
+api "$producer_password_url" > "$ZNN_DIR/wallet/producer-password.txt"
+
+chmod 700 "$ZNN_DIR" "$ZNN_DIR/wallet"
+chmod 600 "$ZNN_DIR/genesis.json" "$ZNN_DIR/config.json" "$ZNN_DIR/wallet/producer.json" "$ZNN_DIR/wallet/producer-password.txt"
+
+cat > /usr/local/bin/znn-testnet-agent <<'AGENT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "\${ZNN_BOOTSTRAP_TOKEN:?Missing ZNN_BOOTSTRAP_TOKEN.}"
+
+BASE_URL="\${ZNN_TESTNET_URL:-${origin}}"
+RPC_URL="\${ZNN_RPC_URL:-http://127.0.0.1:35997}"
+SERVICE_NAME="\${ZNN_SERVICE_NAME:-go-zenon}"
+STATE_DIR="\${ZNN_AGENT_STATE_DIR:-/var/lib/znn-testnet-agent}"
+STATE_FILE="$STATE_DIR/state.json"
+
+mkdir -p "$STATE_DIR"
+
+rpc() {
+  curl -fsS --max-time 5 -H "Content-Type: application/json" \\
+    -d "{\\"jsonrpc\\":\\"2.0\\",\\"id\\":1,\\"method\\":\\"$1\\",\\"params\\":[]}" \\
+    "$RPC_URL" | jq -c '.result // {}'
+}
+
+sync_json="$(rpc stats.syncInfo || echo '{}')"
+network_json="$(rpc stats.networkInfo || echo '{}')"
+service_active=false
+if systemctl is-active --quiet "$SERVICE_NAME"; then
+  service_active=true
+fi
+
+logs="$(journalctl -u "$SERVICE_NAME" --since '1 minute ago' --no-pager 2>/dev/null | grep -Eai 'error|warn|panic|fatal|failed|exception' | tail -20 || true)"
+error_count="$(printf '%s\\n' "$logs" | grep -Eai 'error|panic|fatal|failed|exception' | grep -c . || true)"
+warn_count="$(printf '%s\\n' "$logs" | grep -Eai 'warn' | grep -c . || true)"
+recent_json="$(printf '%s\\n' "$logs" | jq -R . | jq -s .)"
+
+manifest="$(curl -fsSL -H "Authorization: Bearer $ZNN_BOOTSTRAP_TOKEN" "$BASE_URL/api/bootstrap/manifest")"
+go_repo="$(printf '%s' "$manifest" | jq -r '.goZenon.repoUrl')"
+go_ref="$(printf '%s' "$manifest" | jq -r '.goZenon.ref')"
+go_commit="$(printf '%s' "$manifest" | jq -r '.goZenon.commit // empty')"
+
+payload="$(jq -n \\
+  --arg reportedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
+  --arg hostname "$(hostname)" \\
+  --arg goRepo "$go_repo" \\
+  --arg goRef "$go_ref" \\
+  --arg goCommit "$go_commit" \\
+  --argjson serviceActive "$service_active" \\
+  --argjson sync "$sync_json" \\
+  --argjson network "$network_json" \\
+  --argjson errors "$error_count" \\
+  --argjson warnings "$warn_count" \\
+  --argjson recent "$recent_json" \\
+  '{
+    reportedAt: $reportedAt,
+    node: {
+      hostname: $hostname,
+      serviceActive: $serviceActive,
+      installedRepo: $goRepo,
+      installedRef: $goRef,
+      installedCommit: $goCommit
+    },
+    sync: {
+      state: $sync.state,
+      currentHeight: $sync.currentHeight,
+      targetHeight: $sync.targetHeight
+    },
+    network: {
+      peerCount: (($network.peers // []) | length),
+      selfPublicKey: $network.self.publicKey,
+      selfIp: $network.self.ip,
+      peers: (($network.peers // []) | map({
+        publicKey: .publicKey,
+        ip: .ip,
+        name: .name,
+        version: .version
+      }) | .[0:20])
+    },
+    logs: {
+      errorCountLastMinute: $errors,
+      warningCountLastMinute: $warnings,
+      recent: $recent
+    }
+  }')"
+
+curl -fsS -X POST "$BASE_URL/api/bootstrap/status" \\
+  -H "Authorization: Bearer $ZNN_BOOTSTRAP_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d "$payload" >/dev/null
+
+printf '%s\\n' "$payload" > "$STATE_FILE"
+AGENT
+
+chmod 700 /usr/local/bin/znn-testnet-agent
+
+cat > /etc/cron.d/znn-testnet-agent <<EOF
+ZNN_BOOTSTRAP_TOKEN=$ZNN_BOOTSTRAP_TOKEN
+ZNN_TESTNET_URL=$BASE_URL
+ZNN_RPC_URL=$RPC_URL
+ZNN_SERVICE_NAME=$SERVICE_NAME
+*/1 * * * * root flock -n /var/lock/znn-testnet-agent.lock /usr/local/bin/znn-testnet-agent
+EOF
+chmod 600 /etc/cron.d/znn-testnet-agent
+
+systemctl restart "$SERVICE_NAME"
+/usr/local/bin/znn-testnet-agent || true
+
+echo "Zenon testnet node installed and configured."
+`;
 }
 
 function historySample(report: NodeStatusReport): NodeStatusReport {
@@ -320,8 +577,45 @@ async function main() {
     sendJsonFile(response, state.publishedArtifacts.config);
   });
 
+  app.get(PUBLIC_NODE_PLAN_PATH, async (_request, response) => {
+    const state = await readState();
+    sendJsonFile(response, nodePlan(state));
+  });
+
   app.post("/api/bootstrap/status", receiveNodeStatus);
   app.post("/api/node/status", receiveNodeStatus);
+
+  app.get("/api/bootstrap/install.sh", (request, response) => {
+    response.setHeader("Content-Type", "text/x-shellscript; charset=utf-8");
+    response.setHeader("Cache-Control", "no-store");
+    response.send(bootstrapInstallScript(requestOrigin(request)));
+  });
+
+  app.get("/api/bootstrap/manifest", async (request, response) => {
+    await withBootstrapPillar(request, response, (state, pillar) => {
+      response.json(bootstrapManifest(request, state, pillar));
+    });
+  });
+
+  app.get("/api/bootstrap/pillar-config.json", async (request, response) => {
+    await withBootstrapPillar(request, response, (state, pillar) => {
+      sendJsonFile(response, pillarConfigForDeployment(state.settings, pillar));
+    });
+  });
+
+  app.get("/api/bootstrap/producer.json", async (request, response) => {
+    await withBootstrapPillar(request, response, (_state, pillar) => {
+      sendJsonFile(response, pillar.producerWallet.keyFile);
+    });
+  });
+
+  app.get("/api/bootstrap/producer-password.txt", async (request, response) => {
+    await withBootstrapPillar(request, response, (_state, pillar) => {
+      response.setHeader("Content-Type", "text/plain; charset=utf-8");
+      response.setHeader("Cache-Control", "no-store");
+      response.send(`${producerPassword(pillar)}\n`);
+    });
+  });
 
   app.post("/api/auth/login", async (request, response) => {
     const parsed = loginSchema.safeParse(request.body);
@@ -350,7 +644,11 @@ async function main() {
     const user = (request as AuthedRequest).user;
     const state = await readState();
     const pillar = state.pillars.find((candidate) => candidate.userId === user.id);
-    response.json({ user, pillar: pillar ? toPublicPillar(pillar) : undefined });
+    response.json({
+      user,
+      pillar: pillar ? toPublicPillar(pillar) : undefined,
+      bootstrap: pillar?.statusTokenCipher ? { statusToken: statusToken(pillar) } : undefined
+    });
   });
 
   app.post("/api/pillar", requireAuth(), async (request, response) => {

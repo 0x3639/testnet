@@ -164,18 +164,30 @@ export function buildGenesis(settings: NetworkSettings, pillars: PillarRecord[])
   };
 }
 
-export function buildNodeConfig(settings: NetworkSettings, pillar?: PillarRecord, producerPassword?: string) {
+export function buildNodeConfig(
+  settings: NetworkSettings,
+  pillar?: PillarRecord,
+  producerPassword?: string,
+  paths: {
+    dataPath?: string;
+    walletPath?: string;
+    genesisFile?: string;
+    producerKeyFilePath?: string;
+  } = {}
+) {
+  const dataPath = paths.dataPath ?? "/var/lib/znn";
+  const walletPath = paths.walletPath ?? `${dataPath}/wallet`;
   return {
-    DataPath: "/var/lib/znn",
-    WalletPath: "/var/lib/znn/wallet",
-    GenesisFile: "/var/lib/znn/genesis.json",
+    DataPath: dataPath,
+    WalletPath: walletPath,
+    GenesisFile: paths.genesisFile ?? `${dataPath}/genesis.json`,
     Name: pillar?.pillarName ?? "zenon-testnet-node",
     LogLevel: "info",
     Producer: pillar
       ? {
           Address: pillar.producerWallet.address,
           Index: pillar.producerIndex,
-          KeyFilePath: "/var/lib/znn/wallet/producer.json",
+          KeyFilePath: paths.producerKeyFilePath ?? `${walletPath}/producer.json`,
           Password: producerPassword ?? "<producer-password>"
         }
       : undefined,

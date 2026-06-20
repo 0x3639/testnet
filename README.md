@@ -16,6 +16,8 @@ The backend is Node/Express. The frontend is React/Vite and follows the dark, co
 - Live and finalized `genesis.json` preview.
 - Base non-producing `config.json` preview.
 - Public publish step for `/genesis.json` and `/config.json`.
+- Operator bootstrap command that installs go-zenon with `hypercore-one/deployment`, then writes the pillar-specific genesis, config, producer keyfile, and producer password.
+- Per-pillar node status reporting from the bootstrap agent.
 - Admin user and pillar deletion.
 - A local four-node devnet generation script for validating the produced genesis/config artifacts.
 
@@ -67,6 +69,19 @@ npm run account -- list
 npm run account -- create-admin --username admin --password "change-me"
 npm run account -- create-user --username pillar-a --password "change-me"
 ```
+
+## Release Target Configuration
+
+The node bootstrap script reads its install target from the app environment. Defaults point at the upstream Zenon node and the deployment helper requested for this project:
+
+```text
+GO_ZENON_REPO=https://github.com/zenon-network/go-zenon.git
+GO_ZENON_REF=master
+DEPLOYMENT_REPO=https://github.com/hypercore-one/deployment.git
+DEPLOYMENT_REF=main
+```
+
+Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`. The optional `GO_ZENON_COMMIT` environment variable is reported in the bootstrap manifest and node status table when you want the control panel to display a pinned commit, but the current deployment helper installs by ref.
 
 ## Standalone Docker
 
@@ -151,6 +166,10 @@ Set these stack environment variables:
 - `APP_SECRET`: a stable secret, for example the output of `openssl rand -hex 32`.
 - `TESTNET_HOST`: the public host Caddy should route, for example `testnet.zenon.info`.
 - `TZ`: optional, defaults to `Etc/UTC`.
+- `GO_ZENON_REPO`: optional, defaults to `https://github.com/zenon-network/go-zenon.git`.
+- `GO_ZENON_REF`: optional, defaults to `master`.
+- `DEPLOYMENT_REPO`: optional, defaults to `https://github.com/hypercore-one/deployment.git`.
+- `DEPLOYMENT_REF`: optional, defaults to `main`.
 
 Example values:
 
@@ -237,7 +256,7 @@ If you create a Portainer stack with the Web Editor instead of the Git Repositor
 1. Sign in as an admin.
 2. Create one operator login per expected pillar.
 3. Send each operator the copied login URL, username, and password.
-4. Ask each operator to sign in, choose a pillar name, and download their pillar package.
+4. Ask each operator to sign in, choose a pillar name, and either download their pillar package or copy the bootstrap command.
 5. Add or probe the seed node in the admin panel so `Net.Seeders` contains the seed node enode.
 6. Review the generated `genesis.json` and `config.json`.
 7. Finalize the genesis when registrations are complete.
@@ -259,9 +278,34 @@ Each operator downloads a ZIP containing:
 
 The package `config.json` is pillar-specific and includes the producer settings. The public `/config.json` is a generic non-producing node config.
 
+## Operator Bootstrap
+
+After registering a pillar, the operator page shows a copyable command shaped like this:
+
+```bash
+curl -fsSL "https://<TESTNET_HOST>/api/bootstrap/install.sh" | sudo env ZNN_BOOTSTRAP_TOKEN="<pillar-token>" ZNN_TESTNET_URL="https://<TESTNET_HOST>" bash
+```
+
+Run it on the node host. The script is intended for the same Linux/systemd style environment supported by `hypercore-one/deployment`.
+
+The bootstrap flow:
+
+1. Installs basic dependencies.
+2. Downloads the authenticated bootstrap manifest with the pillar token.
+3. Clones `DEPLOYMENT_REPO` at `DEPLOYMENT_REF`.
+4. Runs `./zenon.sh --deploy zenon "$GO_ZENON_REPO" "$GO_ZENON_REF"` to build and install go-zenon.
+5. Stops `go-zenon`.
+6. Writes `/root/.znn/genesis.json`.
+7. Writes the pillar-specific `/root/.znn/config.json`.
+8. Writes `/root/.znn/wallet/producer.json` and `/root/.znn/wallet/producer-password.txt`.
+9. Installs `/usr/local/bin/znn-testnet-agent` and a one-minute cron entry.
+10. Restarts `go-zenon` and sends an initial status report.
+
+The token in the bootstrap command also authorizes producer downloads and node status reporting. Treat it like an operator secret.
+
 ## Node Status Reporting
 
-Each registered pillar receives a private node status token in its operator package. A node agent can use that token to report health back to the orchestrator without exposing the app username or password.
+Each registered pillar receives a private node status token in its operator package and bootstrap command. The installed agent uses that token to report health back to the orchestrator without exposing the app username or password.
 
 Heartbeat reports are sent with a bearer token:
 
@@ -383,6 +427,7 @@ Public endpoints:
 - `GET /api/health`
 - `GET /genesis.json`
 - `GET /config.json`
+- `GET /node-plan.json`
 
 Admin-only downloads:
 
@@ -398,3 +443,11 @@ Node heartbeat reporting:
 
 - `POST /api/bootstrap/status`
 - `POST /api/node/status`
+
+Operator bootstrap:
+
+- `GET /api/bootstrap/install.sh`
+- `GET /api/bootstrap/manifest`
+- `GET /api/bootstrap/pillar-config.json`
+- `GET /api/bootstrap/producer.json`
+- `GET /api/bootstrap/producer-password.txt`

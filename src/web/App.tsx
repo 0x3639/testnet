@@ -10,6 +10,7 @@ import {
   Search,
   Server,
   Shield,
+  Terminal,
   Trash2,
   TriangleAlert,
   UserPlus
@@ -64,6 +65,17 @@ function loginUrl(): string {
 
 function publicUrl(path: string): string {
   return new URL(path, window.location.href).toString();
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function bootstrapCommand(token: string): string {
+  const baseUrl = publicUrl("/").replace(/\/$/, "");
+  return `curl -fsSL ${shellQuote(publicUrl("/api/bootstrap/install.sh"))} | sudo env ZNN_BOOTSTRAP_TOKEN=${shellQuote(
+    token
+  )} ZNN_TESTNET_URL=${shellQuote(baseUrl)} bash`;
 }
 
 function generatePassword(length = 24): string {
@@ -193,6 +205,7 @@ function OperatorView({ session, refresh }: { session: UserOverview; refresh: ()
   const [pillarName, setPillarName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const command = session.bootstrap?.statusToken ? bootstrapCommand(session.bootstrap.statusToken) : "";
 
   async function register(event: FormEvent) {
     event.preventDefault();
@@ -231,7 +244,24 @@ function OperatorView({ session, refresh }: { session: UserOverview; refresh: ()
               <Button icon={<Download size={18} />} onClick={() => download("/api/pillar/package")}>
                 Download Package
               </Button>
+              {command ? (
+                <Button variant="secondary" icon={<Copy size={18} />} onClick={() => copy(command)}>
+                  Copy Bootstrap
+                </Button>
+              ) : null}
             </div>
+            {command ? (
+              <div className="bootstrapBlock">
+                <div className="panelHeader">
+                  <div>
+                    <span className="ledger">Node Bootstrap</span>
+                    <h2>Install command</h2>
+                  </div>
+                  <Terminal size={20} />
+                </div>
+                <pre className="commandBlock">{command}</pre>
+              </div>
+            ) : null}
           </div>
         ) : (
           <form className="panel stack" onSubmit={register}>

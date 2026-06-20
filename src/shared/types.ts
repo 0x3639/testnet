@@ -181,6 +181,9 @@ export interface AdminOverview {
 export interface UserOverview {
   user: AuthUser;
   pillar?: PublicPillar;
+  bootstrap?: {
+    statusToken: string;
+  };
 }
 
 export interface SeedNodeProbeResult {
