@@ -637,9 +637,9 @@ try_auth_get() {
 }
 
 rpc() {
-  curl -fsS --max-time 5 -H "Content-Type: application/json" \\
+  curl -fs --max-time 5 -H "Content-Type: application/json" \\
     -d "{\\"jsonrpc\\":\\"2.0\\",\\"id\\":1,\\"method\\":\\"$1\\",\\"params\\":[]}" \\
-    "$RPC_URL" | jq -c '.result // {}'
+    "$RPC_URL" 2>/dev/null | jq -c '.result // {}'
 }
 
 wipe_data_dir() {

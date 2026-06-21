@@ -372,7 +372,7 @@ curl -fsS -X POST "https://<TESTNET_HOST>/api/bootstrap/status" \
   }'
 ```
 
-The installed agent collects `stats.syncInfo`, `stats.networkInfo`, and `stats.processInfo` from the local node RPC. The admin panel shows the latest report for each pillar and managed seed node, including last seen time, service status, sync height, height lag, peer count, running process version, running process commit, installed ref, and recent log error counts. The server keeps a rolling 24-hour minute-sample history per node and the latest full report.
+The installed agent collects `stats.syncInfo`, `stats.networkInfo`, and `stats.processInfo` from the local node RPC. Immediately after install or restart, RPC may not be listening yet; in that case the agent reports service and log status first, then fills in sync, network, and process fields on a later one-minute check. The admin panel shows the latest report for each pillar and managed seed node, including last seen time, service status, sync height, height lag, peer count, running process version, running process commit, installed ref, and recent log error counts. The server keeps a rolling 24-hour minute-sample history per node and the latest full report.
 
 ## Published Files
 
