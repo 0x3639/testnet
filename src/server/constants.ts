@@ -12,6 +12,7 @@ export const PILLAR_STAKE_ZNN = 15_000;
 export const PILLAR_LIQUID_ZNN = 50_000;
 export const PILLAR_LIQUID_QSR = 500_000;
 export const FUSED_QSR_PER_ADDRESS = 1_000;
+export const DEFAULT_SPORKS_VERSION = 2;
 
 export const DEFAULT_SPORKS = [
   {
@@ -34,5 +35,26 @@ export const DEFAULT_SPORKS = [
     description: "Enable bridge and liquidity embedded contract behavior.",
     activated: true,
     enforcementHeight: 0
+  },
+  {
+    id: "0000000000000000000000000000000000000000000000000000000000000001",
+    name: "dynamic-plasma",
+    description: "Activates Dynamic Plasma",
+    activated: false,
+    enforcementHeight: 10
+  },
+  {
+    id: "0000000000000000000000000000000000000000000000000000000000000002",
+    name: "libp2p",
+    description: "Activates the libp2p networking stack",
+    activated: false,
+    enforcementHeight: 20
+  },
+  {
+    id: "0000000000000000000000000000000000000000000000000000000000000003",
+    name: "governance",
+    description: "Activates the governance stack",
+    activated: false,
+    enforcementHeight: 30
   }
 ] as const;

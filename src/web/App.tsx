@@ -14,7 +14,8 @@ import {
   Terminal,
   Trash2,
   TriangleAlert,
-  UserPlus
+  UserPlus,
+  X
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -908,17 +909,16 @@ interface CreateSeedNodeInput {
 }
 
 function SettingsForm({
-  settings,
+  draft,
+  setDraft,
   onSave,
-  onProbeSeed,
-  onDirtyChange
+  onProbeSeed
 }: {
-  settings: PublicNetworkSettings;
+  draft: PublicNetworkSettings;
+  setDraft: React.Dispatch<React.SetStateAction<PublicNetworkSettings>>;
   onSave: (settings: PublicNetworkSettings) => Promise<void>;
   onProbeSeed: (seed: ProbeSeedInput) => Promise<{ seed: SeedNodeProbeResult; settings: PublicNetworkSettings }>;
-  onDirtyChange: (dirty: boolean) => void;
 }) {
-  const [draft, setDraft] = useState(settings);
   const [seedIp, setSeedIp] = useState("");
   const [seedRpcPort, setSeedRpcPort] = useState(35997);
   const [seedP2pPort, setSeedP2pPort] = useState(35995);
@@ -926,45 +926,6 @@ function SettingsForm({
   const [probing, setProbing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    setDraft(settings);
-    onDirtyChange(false);
-  }, [settings, onDirtyChange]);
-
-  useEffect(() => {
-    onDirtyChange(settingsKey(draft) !== settingsKey(settings));
-  }, [draft, settings, onDirtyChange]);
-
-  function updateSpork(index: number, updates: Partial<SporkRecord>) {
-    setDraft({
-      ...draft,
-      sporks: draft.sporks.map((spork, candidateIndex) => (candidateIndex === index ? { ...spork, ...updates } : spork))
-    });
-  }
-
-  function addSpork() {
-    setDraft({
-      ...draft,
-      sporks: [
-        ...draft.sporks,
-        {
-          id: "",
-          name: "",
-          description: "",
-          activated: true,
-          enforcementHeight: 0
-        }
-      ]
-    });
-  }
-
-  function removeSpork(index: number) {
-    setDraft({
-      ...draft,
-      sporks: draft.sporks.filter((_spork, candidateIndex) => candidateIndex !== index)
-    });
-  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -976,7 +937,6 @@ function SettingsForm({
         seeders: draft.seeders.filter(Boolean),
         sporks: draft.sporks
       });
-      onDirtyChange(false);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -1110,11 +1070,17 @@ function SettingsForm({
           />
         </label>
         <div className="toolbar compactToolbar">
+          <Button variant="secondary" onClick={() => setDraft({ ...draft, releaseApplyAtSec: utcSecondsFromNow(0) })}>
+            Now
+          </Button>
+          <Button variant="secondary" onClick={() => setDraft({ ...draft, releaseApplyAtSec: utcSecondsFromNow(10) })}>
+            +10
+          </Button>
           <Button variant="secondary" onClick={() => setDraft({ ...draft, releaseApplyAtSec: utcSecondsFromNow(30) })}>
-            Apply +30m
+            +30
           </Button>
           <Button variant="secondary" onClick={() => setDraft({ ...draft, releaseApplyAtSec: utcSecondsFromNow(60) })}>
-            Apply +60m
+            +60
           </Button>
           <Button variant="ghost" onClick={() => setDraft({ ...draft, releaseApplyAtSec: undefined })}>
             Clear
@@ -1128,63 +1094,6 @@ function SettingsForm({
           />
           <span>Wipe node data on next Publish Release</span>
         </label>
-      </div>
-      <div className="seedProbe">
-        <div className="panelHeader">
-          <div>
-            <span className="ledger">Genesis</span>
-            <h2>Sporks</h2>
-          </div>
-          <Button variant="secondary" icon={<Plus size={18} />} onClick={addSpork}>
-            Add Spork
-          </Button>
-        </div>
-        <div className="sporkRows">
-          {draft.sporks.map((spork, index) => (
-            <div className="sporkRow" key={`${spork.id || "new"}-${index}`}>
-              <label>
-                <span>Name</span>
-                <input value={spork.name} required onChange={(event) => updateSpork(index, { name: event.target.value })} />
-              </label>
-              <label className="sporkIdField">
-                <span>ID</span>
-                <input
-                  className="mono"
-                  value={spork.id}
-                  required
-                  pattern="[0-9a-fA-F]{64}"
-                  onChange={(event) => updateSpork(index, { id: event.target.value.trim() })}
-                />
-              </label>
-              <label>
-                <span>Activation Height</span>
-                <input
-                  className="mono"
-                  type="number"
-                  min={0}
-                  value={spork.enforcementHeight}
-                  onChange={(event) => updateSpork(index, { enforcementHeight: Number(event.target.value) })}
-                />
-              </label>
-              <label className="checkboxRow sporkActiveRow">
-                <input
-                  type="checkbox"
-                  checked={spork.activated}
-                  onChange={(event) => updateSpork(index, { activated: event.target.checked })}
-                />
-                <span>Active</span>
-              </label>
-              <label className="sporkDescriptionField">
-                <span>Description</span>
-                <input value={spork.description} onChange={(event) => updateSpork(index, { description: event.target.value })} />
-              </label>
-              <Button variant="danger" icon={<Trash2 size={18} />} onClick={() => removeSpork(index)}>
-                Delete
-              </Button>
-            </div>
-          ))}
-          {draft.sporks.length === 0 ? <div className="emptyState">No sporks configured</div> : null}
-        </div>
       </div>
       <div className="seedProbe">
         <div className="panelHeader">
@@ -1248,8 +1157,136 @@ function SettingsForm({
   );
 }
 
+function GenesisSporkEditor({
+  draft,
+  setDraft,
+  onSave
+}: {
+  draft: PublicNetworkSettings;
+  setDraft: React.Dispatch<React.SetStateAction<PublicNetworkSettings>>;
+  onSave: (settings: PublicNetworkSettings) => Promise<void>;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  function updateSpork(index: number, updates: Partial<SporkRecord>) {
+    setDraft((current) => ({
+      ...current,
+      sporks: current.sporks.map((spork, candidateIndex) => (candidateIndex === index ? { ...spork, ...updates } : spork))
+    }));
+  }
+
+  function addSpork() {
+    setDraft((current) => ({
+      ...current,
+      sporks: [
+        ...current.sporks,
+        {
+          id: "",
+          name: "",
+          description: "",
+          activated: true,
+          enforcementHeight: 0
+        }
+      ]
+    }));
+  }
+
+  function removeSpork(index: number) {
+    setDraft((current) => ({
+      ...current,
+      sporks: current.sporks.filter((_spork, candidateIndex) => candidateIndex !== index)
+    }));
+  }
+
+  async function saveSporks(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await onSave({
+        ...draft,
+        seeders: draft.seeders.filter(Boolean)
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="genesisSporkPanel" onSubmit={saveSporks}>
+      <div className="panelHeader">
+        <div>
+          <span className="ledger">Genesis</span>
+          <h2>Sporks</h2>
+        </div>
+        <div className="toolbar compactToolbar">
+          <Button variant="secondary" icon={<Plus size={18} />} onClick={addSpork}>
+            Add Spork
+          </Button>
+          <Button type="submit" icon={<Save size={18} />} disabled={saving}>
+            {saving ? "Saving" : "Save Sporks"}
+          </Button>
+        </div>
+      </div>
+      <div className="sporkRows">
+        <div className="sporkHeader" aria-hidden="true">
+          <span>Name</span>
+          <span>ID</span>
+          <span>Activation Height</span>
+          <span>Active</span>
+          <span />
+        </div>
+        {draft.sporks.map((spork, index) => (
+          <div className="sporkRow" key={`${spork.id || "new"}-${index}`}>
+            <input
+              aria-label="Spork name"
+              value={spork.name}
+              required
+              onChange={(event) => updateSpork(index, { name: event.target.value })}
+            />
+            <input
+              aria-label="Spork ID"
+              className="mono"
+              value={spork.id}
+              required
+              pattern="[0-9a-fA-F]{64}"
+              onChange={(event) => updateSpork(index, { id: event.target.value.trim() })}
+            />
+            <input
+              aria-label="Spork activation height"
+              className="mono"
+              type="number"
+              min={0}
+              value={spork.enforcementHeight}
+              onChange={(event) => updateSpork(index, { enforcementHeight: Number(event.target.value) })}
+            />
+            <label className="sporkActiveRow">
+              <input
+                aria-label="Spork active"
+                type="checkbox"
+                checked={spork.activated}
+                onChange={(event) => updateSpork(index, { activated: event.target.checked })}
+              />
+            </label>
+            <button className="sporkDeleteButton" type="button" onClick={() => removeSpork(index)} aria-label={`Delete ${spork.name || "spork"}`}>
+              <X size={22} />
+            </button>
+          </div>
+        ))}
+        {draft.sporks.length === 0 ? <div className="emptyState">No sporks configured</div> : null}
+      </div>
+      {error ? <div className="alert">{error}</div> : null}
+    </form>
+  );
+}
+
 function AdminView({ session, refresh, refreshState }: { session: AdminOverview; refresh: () => Promise<void>; refreshState: RefreshState }) {
   const [tab, setTab] = useState<"genesis" | "config">("genesis");
+  const [settingsDraft, setSettingsDraft] = useState(session.settings);
+  const [settingsDirty, setSettingsDirty] = useState(false);
   const json = useMemo(() => JSON.stringify(tab === "genesis" ? session.genesis : session.configTemplate, null, 2), [session, tab]);
   const telemetryNodes: TelemetryNode[] = useMemo(
     () => [
@@ -1268,6 +1305,13 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
     ],
     [session.pillars, session.seedNodes]
   );
+  useEffect(() => {
+    setSettingsDraft(session.settings);
+    setSettingsDirty(false);
+  }, [session.settings]);
+  useEffect(() => {
+    setSettingsDirty(settingsKey(settingsDraft) !== settingsKey(session.settings));
+  }, [settingsDraft, session.settings]);
   const userById = useMemo(() => new Map(session.users.map((user) => [user.id, user])), [session.users]);
   const availableSeedNodeUsers = useMemo(
     () => session.users.filter((user) => user.role === "user" && !user.nodeName),
@@ -1275,7 +1319,6 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
   );
   const [adminError, setAdminError] = useState("");
   const [publishing, setPublishing] = useState(false);
-  const [settingsDirty, setSettingsDirty] = useState(false);
   const [seedNodeInput, setSeedNodeInput] = useState<CreateSeedNodeInput>({
     userId: "",
     nodeName: "",
@@ -1576,7 +1619,7 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
           </table>
         </div>
       </section>
-      <SettingsForm settings={session.settings} onSave={saveSettings} onProbeSeed={probeSeed} onDirtyChange={setSettingsDirty} />
+      <SettingsForm draft={settingsDraft} setDraft={setSettingsDraft} onSave={saveSettings} onProbeSeed={probeSeed} />
       <section className="panel jsonPanel">
         <div className="panelHeader">
           <div className="tabs">
@@ -1604,6 +1647,7 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
         </div>
         {session.finalizedAt ? <div className="successLine">Finalized {new Date(session.finalizedAt).toLocaleString()}</div> : null}
         {session.published ? <PublishedArtifacts published={session.published} /> : null}
+        {tab === "genesis" ? <GenesisSporkEditor draft={settingsDraft} setDraft={setSettingsDraft} onSave={saveSettings} /> : null}
         <pre>{json}</pre>
       </section>
     </div>

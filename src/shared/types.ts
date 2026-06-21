@@ -91,6 +91,7 @@ export interface AppState {
   pillars: PillarRecord[];
   seedNodes: SeedNodeRecord[];
   settings: NetworkSettings;
+  defaultSporksVersion?: number;
   finalizedGenesis?: {
     finalizedAt: string;
     genesis: unknown;

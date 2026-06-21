@@ -596,35 +596,71 @@ th {
 
 .sporkRows {
   display: grid;
-  gap: 10px;
+  gap: 0;
 }
 
+.genesisSporkPanel {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #181b1a;
+  padding: 14px;
+}
+
+.genesisSporkPanel .panelHeader {
+  margin-bottom: 0;
+}
+
+.sporkHeader,
 .sporkRow {
   display: grid;
-  grid-template-columns: minmax(120px, 0.9fr) minmax(260px, 1.5fr) minmax(108px, 0.55fr) auto minmax(170px, 1fr) auto;
-  gap: 10px;
-  align-items: end;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
+  grid-template-columns: minmax(130px, 0.85fr) minmax(360px, 2.3fr) 84px 58px 40px;
+  gap: 12px;
+  align-items: center;
 }
 
-.sporkRow:first-child {
-  border-top: 0;
-  padding-top: 0;
+.sporkHeader {
+  color: var(--muted);
+  font-size: 0.86rem;
+  padding-bottom: 8px;
 }
 
-.sporkIdField,
-.sporkDescriptionField {
+.sporkHeader span {
   min-width: 0;
 }
 
-.sporkActiveRow {
-  grid-column: auto;
-  min-height: 43px;
+.sporkRow {
+  border-top: 1px solid var(--border);
+  padding: 10px 0;
 }
 
-.sporkRow .btn {
-  min-height: 43px;
+.sporkRow:last-child {
+  padding-bottom: 0;
+}
+
+.sporkActiveRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+}
+
+.sporkDeleteButton {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(255, 84, 112, 0.45);
+  border-radius: var(--radius);
+  color: var(--danger);
+  background: rgba(255, 84, 112, 0.08);
+  cursor: pointer;
+}
+
+.sporkDeleteButton:hover {
+  background: rgba(255, 84, 112, 0.16);
 }
 
 .emptyState {

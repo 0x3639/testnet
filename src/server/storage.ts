@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { DEFAULT_SPORKS } from "./constants.js";
+import { DEFAULT_SPORKS, DEFAULT_SPORKS_VERSION } from "./constants.js";
 import type { AppState, NetworkSettings } from "../shared/types.js";
 
 const DATA_DIR = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
@@ -39,14 +39,26 @@ function defaultState(): AppState {
     sessions: [],
     pillars: [],
     seedNodes: [],
+    defaultSporksVersion: DEFAULT_SPORKS_VERSION,
     settings: defaultSettings()
   };
+}
+
+function mergeDefaultSporks(sporks: NetworkSettings["sporks"], currentVersion?: number): NetworkSettings["sporks"] {
+  if (currentVersion && currentVersion >= DEFAULT_SPORKS_VERSION) return sporks;
+
+  const existingIds = new Set(sporks.map((spork) => spork.id.toLowerCase()));
+  return [
+    ...sporks,
+    ...DEFAULT_SPORKS.filter((spork) => !existingIds.has(spork.id.toLowerCase())).map((spork) => ({ ...spork }))
+  ];
 }
 
 function normalizeState(state: Partial<AppState>): AppState {
   const defaults = defaultState();
   const settingsDefaults = defaultSettings();
   const settings = state.settings ?? ({} as Partial<NetworkSettings>);
+  const sporks = settings.sporks?.length ? settings.sporks : settingsDefaults.sporks;
   return {
     ...defaults,
     ...state,
@@ -57,8 +69,9 @@ function normalizeState(state: Partial<AppState>): AppState {
     settings: {
       ...settingsDefaults,
       ...settings,
-      sporks: settings.sporks?.length ? settings.sporks : settingsDefaults.sporks
-    }
+      sporks: mergeDefaultSporks(sporks, state.defaultSporksVersion)
+    },
+    defaultSporksVersion: DEFAULT_SPORKS_VERSION
   };
 }
 

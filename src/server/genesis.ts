@@ -234,7 +234,7 @@ export function readiness(state: AppState): ReadinessCheck[] {
     },
     {
       label: "Active sporks",
-      ok: state.settings.sporks.every((spork) => spork.activated),
+      ok: state.settings.sporks.some((spork) => spork.activated),
       detail: `${state.settings.sporks.filter((spork) => spork.activated).length}/${state.settings.sporks.length} activated`
     },
     {
