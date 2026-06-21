@@ -304,6 +304,7 @@ curl -fsSL "https://<TESTNET_HOST>/api/bootstrap/install.sh" | sudo env ZNN_BOOT
 ```
 
 Run it on the node host. The script is intended for the same Linux/systemd style environment supported by `hypercore-one/deployment`.
+For testnet operators, the bootstrap agent relaxes the deployment script CPU pre-flight minimum from 4 cores to 2 cores by default. Override it by adding `ZNN_DEPLOYMENT_MIN_CPU_CORES="<cores>"` to the bootstrap command if a stricter minimum is needed.
 
 The bootstrap flow before a release is published:
 
@@ -317,14 +318,15 @@ After **Publish Release**, the agent waits until `actions.applyAt` if that times
 
 1. Downloads the authenticated bootstrap manifest with the node token.
 2. Clones `DEPLOYMENT_REPO` at `DEPLOYMENT_REF`.
-3. Runs `./zenon.sh --deploy zenon "$GO_ZENON_REPO" "$GO_ZENON_REF"` to build and install go-zenon.
-4. Stops `go-zenon`.
-5. Wipes node data if the published node plan has `actions.wipeData: true`.
-6. Writes `/root/.znn/genesis.json`.
-7. Writes the node-specific `/root/.znn/config.json`.
-8. For pillars, writes `/root/.znn/wallet/producer.json` and `/root/.znn/wallet/producer-password.txt`.
-9. For managed seed nodes, writes `/root/.znn/network-private-key`.
-10. Restarts `go-zenon` and sends a status report.
+3. Patches the deployment pre-flight CPU minimum to `ZNN_DEPLOYMENT_MIN_CPU_CORES`, default `2`.
+4. Runs `./zenon.sh --deploy zenon "$GO_ZENON_REPO" "$GO_ZENON_REF"` to build and install go-zenon.
+5. Stops `go-zenon`.
+6. Wipes node data if the published node plan has `actions.wipeData: true`.
+7. Writes `/root/.znn/genesis.json`.
+8. Writes the node-specific `/root/.znn/config.json`.
+9. For pillars, writes `/root/.znn/wallet/producer.json` and `/root/.znn/wallet/producer-password.txt`.
+10. For managed seed nodes, writes `/root/.znn/network-private-key`.
+11. Restarts `go-zenon` and sends a status report.
 
 The wipe action is controlled by **Wipe node data on next Publish Release** in admin Settings. It is one-shot: publishing a release snapshots the flag into `/node-plan.json`, then clears the draft checkbox. **Apply Release At (UTC)** is also one-shot: publishing snapshots it into `/node-plan.json`, then clears the draft field. The agent preserves `/root/.znn/wallet`, `/root/.znn/genesis.json`, `/root/.znn/config.json`, and `/root/.znn/network-private-key`, and removes other files/directories under `/root/.znn` before writing the published artifacts.
 

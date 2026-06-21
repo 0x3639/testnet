@@ -572,8 +572,13 @@ fi
 BASE_URL="\${ZNN_TESTNET_URL:-${origin}}"
 ZNN_DIR="\${ZNN_DIR:-/root/.znn}"
 DEPLOYMENT_DIR="\${ZNN_DEPLOYMENT_DIR:-/opt/zenon-deployment}"
+DEPLOYMENT_MIN_CPU_CORES="\${ZNN_DEPLOYMENT_MIN_CPU_CORES:-2}"
 SERVICE_NAME="\${ZNN_SERVICE_NAME:-go-zenon}"
 RPC_URL="\${ZNN_RPC_URL:-http://127.0.0.1:35997}"
+
+if ! [[ "$DEPLOYMENT_MIN_CPU_CORES" =~ ^[0-9]+$ ]] || (( DEPLOYMENT_MIN_CPU_CORES < 1 )); then
+  DEPLOYMENT_MIN_CPU_CORES=2
+fi
 
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update
@@ -588,11 +593,11 @@ ENV_FILE="\${ZNN_AGENT_ENV_FILE:-/etc/cron.d/znn-testnet-agent}"
 if [[ -z "\${ZNN_BOOTSTRAP_TOKEN:-}" && -r "$ENV_FILE" ]]; then
   while IFS='=' read -r key value; do
     case "$key" in
-      ZNN_BOOTSTRAP_TOKEN|ZNN_TESTNET_URL|ZNN_DIR|ZNN_DEPLOYMENT_DIR|ZNN_RPC_URL|ZNN_SERVICE_NAME|ZNN_AGENT_STATE_DIR)
+      ZNN_BOOTSTRAP_TOKEN|ZNN_TESTNET_URL|ZNN_DIR|ZNN_DEPLOYMENT_DIR|ZNN_DEPLOYMENT_MIN_CPU_CORES|ZNN_RPC_URL|ZNN_SERVICE_NAME|ZNN_AGENT_STATE_DIR)
         [[ -n "$value" ]] && export "$key=$value"
         ;;
     esac
-  done < <(grep -E '^(ZNN_BOOTSTRAP_TOKEN|ZNN_TESTNET_URL|ZNN_DIR|ZNN_DEPLOYMENT_DIR|ZNN_RPC_URL|ZNN_SERVICE_NAME|ZNN_AGENT_STATE_DIR)=' "$ENV_FILE" || true)
+  done < <(grep -E '^(ZNN_BOOTSTRAP_TOKEN|ZNN_TESTNET_URL|ZNN_DIR|ZNN_DEPLOYMENT_DIR|ZNN_DEPLOYMENT_MIN_CPU_CORES|ZNN_RPC_URL|ZNN_SERVICE_NAME|ZNN_AGENT_STATE_DIR)=' "$ENV_FILE" || true)
 fi
 
 : "\${ZNN_BOOTSTRAP_TOKEN:?Missing ZNN_BOOTSTRAP_TOKEN.}"
@@ -600,6 +605,7 @@ fi
 BASE_URL="\${ZNN_TESTNET_URL:-${origin}}"
 ZNN_DIR="\${ZNN_DIR:-/root/.znn}"
 DEPLOYMENT_DIR="\${ZNN_DEPLOYMENT_DIR:-/opt/zenon-deployment}"
+DEPLOYMENT_MIN_CPU_CORES="\${ZNN_DEPLOYMENT_MIN_CPU_CORES:-2}"
 RPC_URL="\${ZNN_RPC_URL:-http://127.0.0.1:35997}"
 SERVICE_NAME="\${ZNN_SERVICE_NAME:-go-zenon}"
 STATE_DIR="\${ZNN_AGENT_STATE_DIR:-/var/lib/znn-testnet-agent}"
@@ -607,6 +613,10 @@ INSTALL_STATE_FILE="$STATE_DIR/install-state.json"
 STATUS_FILE="$STATE_DIR/status.json"
 
 mkdir -p "$STATE_DIR"
+
+if ! [[ "$DEPLOYMENT_MIN_CPU_CORES" =~ ^[0-9]+$ ]] || (( DEPLOYMENT_MIN_CPU_CORES < 1 )); then
+  DEPLOYMENT_MIN_CPU_CORES=2
+fi
 
 auth_get() {
   curl -fsSL -H "Authorization: Bearer $ZNN_BOOTSTRAP_TOKEN" "$1"
@@ -645,6 +655,14 @@ wipe_data_dir() {
     rm -rf -- "$item"
   done
   shopt -u dotglob nullglob
+}
+
+patch_deployment_preflight() {
+  local preflight_file="$DEPLOYMENT_DIR/lib/preflight.sh"
+  [[ -f "$preflight_file" ]] || return 0
+
+  sed -i -E "s/cores < [0-9]+/cores < $DEPLOYMENT_MIN_CPU_CORES/" "$preflight_file"
+  sed -i -E "s/Minimum [0-9]+ required\\./Minimum $DEPLOYMENT_MIN_CPU_CORES required./" "$preflight_file"
 }
 
 install_release() {
@@ -695,6 +713,7 @@ install_release() {
     rm -rf "$DEPLOYMENT_DIR"
     git clone --depth 1 --branch "$deployment_ref" "$deployment_repo" "$DEPLOYMENT_DIR"
     chmod +x "$DEPLOYMENT_DIR/zenon.sh"
+    patch_deployment_preflight
 
     cd "$DEPLOYMENT_DIR"
     ./zenon.sh --deploy zenon "$go_repo" "$go_ref"
@@ -875,6 +894,7 @@ chmod 700 /usr/local/bin/znn-testnet-agent
 cat > /etc/cron.d/znn-testnet-agent <<EOF
 ZNN_BOOTSTRAP_TOKEN=$ZNN_BOOTSTRAP_TOKEN
 ZNN_TESTNET_URL=$BASE_URL
+ZNN_DEPLOYMENT_MIN_CPU_CORES=$DEPLOYMENT_MIN_CPU_CORES
 ZNN_RPC_URL=$RPC_URL
 ZNN_SERVICE_NAME=$SERVICE_NAME
 */1 * * * * root flock -n /var/lock/znn-testnet-agent.lock /usr/local/bin/znn-testnet-agent
