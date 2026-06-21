@@ -120,6 +120,7 @@ const optionalNullableText = (max: number) =>
     .max(max)
     .nullish()
     .transform((value) => value ?? undefined);
+const optionalNullableInt = (schema: z.ZodNumber) => schema.nullish().transform((value) => value ?? undefined);
 
 const nodeStatusReportSchema = z.object({
   eventId: z.string().trim().max(120).optional(),
@@ -129,23 +130,23 @@ const nodeStatusReportSchema = z.object({
       hostname: optionalShortText,
       serviceActive: z.boolean().optional(),
       waitingForRelease: z.boolean().optional(),
-      installedRepo: z.string().trim().max(300).optional(),
-      installedRef: optionalShortText,
-      installedCommit: optionalShortText,
-      genesisSha256: optionalShortText,
-      configSha256: optionalShortText
+      installedRepo: optionalNullableText(300),
+      installedRef: optionalNullableText(256),
+      installedCommit: optionalNullableText(256),
+      genesisSha256: optionalNullableText(256),
+      configSha256: optionalNullableText(256)
     })
     .optional(),
   sync: z
     .object({
-      state: z.number().int().min(0).max(10).optional(),
-      currentHeight: z.number().int().min(0).optional(),
-      targetHeight: z.number().int().min(0).optional()
+      state: optionalNullableInt(z.number().int().min(0).max(10)),
+      currentHeight: optionalNullableInt(z.number().int().min(0)),
+      targetHeight: optionalNullableInt(z.number().int().min(0))
     })
     .optional(),
   network: z
     .object({
-      peerCount: z.number().int().min(0).max(10000).optional(),
+      peerCount: optionalNullableInt(z.number().int().min(0).max(10000)),
       selfPublicKey: optionalNullableText(256),
       selfIp: optionalNullableText(128),
       peers: z
@@ -663,8 +664,11 @@ patch_deployment_preflight() {
 
   sed -i -E "s/cores < [0-9]+/cores < $DEPLOYMENT_MIN_CPU_CORES/" "$preflight_file"
   sed -i -E "s/Minimum [0-9]+ required\\./Minimum $DEPLOYMENT_MIN_CPU_CORES required./" "$preflight_file"
+  sed -i -E '/mem_total_gb < [0-9]+/,/fi/ s/error_log "Total RAM \\$\\{mem_total_gb\\}GiB detected\\. Minimum [0-9]+GiB required\\."/warn_log "Total RAM \\\${mem_total_gb}GiB detected. 4GiB recommended for go-zenon builds."/' "$preflight_file"
+  sed -i -E '/mem_total_gb < [0-9]+/,/fi/ s/^[[:space:]]*return 1[[:space:]]*$/:/' "$preflight_file"
   echo "Deployment CPU pre-flight minimum: $DEPLOYMENT_MIN_CPU_CORES core(s)"
-  grep -E 'cores <|Minimum [0-9]+ required' "$preflight_file" || true
+  echo "Deployment RAM pre-flight: warning only (4GiB recommended)"
+  grep -E 'cores <|Minimum [0-9]+ required|mem_total_gb <|Total RAM|4GiB recommended' "$preflight_file" || true
 }
 
 install_release() {
@@ -837,11 +841,10 @@ report_status() {
         installedRef: $goRef,
         installedCommit: $goCommit
       },
-      sync: {
-        state: $sync.state,
-        currentHeight: $sync.currentHeight,
-        targetHeight: $sync.targetHeight
-      },
+      sync: ({
+      } + (if ($sync.state // null) == null then {} else { state: $sync.state } end)
+        + (if ($sync.currentHeight // null) == null then {} else { currentHeight: $sync.currentHeight } end)
+        + (if ($sync.targetHeight // null) == null then {} else { targetHeight: $sync.targetHeight } end)),
       network: ({
         peerCount: (($network.peers // []) | length)
       } + (if ($network.self.publicKey // null) == null then {} else { selfPublicKey: $network.self.publicKey } end)
