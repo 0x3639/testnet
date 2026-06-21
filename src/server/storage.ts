@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_SPORKS } from "./constants.js";
 import type { AppState, NetworkSettings } from "../shared/types.js";
@@ -10,6 +11,7 @@ const DEFAULT_GO_ZENON_REF = process.env.GO_ZENON_REF ?? "master";
 const DEFAULT_GO_ZENON_COMMIT = process.env.GO_ZENON_COMMIT;
 const DEFAULT_DEPLOYMENT_REPO = process.env.DEPLOYMENT_REPO ?? "https://github.com/hypercore-one/deployment.git";
 const DEFAULT_DEPLOYMENT_REF = process.env.DEPLOYMENT_REF ?? "main";
+let stateUpdateQueue = Promise.resolve();
 
 function defaultSettings(): NetworkSettings {
   return {
@@ -41,25 +43,145 @@ function defaultState(): AppState {
   };
 }
 
+function normalizeState(state: Partial<AppState>): AppState {
+  const defaults = defaultState();
+  const settingsDefaults = defaultSettings();
+  const settings = state.settings ?? ({} as Partial<NetworkSettings>);
+  return {
+    ...defaults,
+    ...state,
+    users: state.users ?? [],
+    sessions: state.sessions ?? [],
+    pillars: state.pillars ?? [],
+    seedNodes: state.seedNodes ?? [],
+    settings: {
+      ...settingsDefaults,
+      ...settings,
+      sporks: settings.sporks?.length ? settings.sporks : settingsDefaults.sporks
+    }
+  };
+}
+
 async function ensureDataDir(): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true });
+}
+
+function findJsonValueEnd(content: string, start: number): number | undefined {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let started = false;
+
+  for (let index = start; index < content.length; index += 1) {
+    const char = content[index];
+    if (!started) {
+      if (/\s/.test(char)) continue;
+      if (char !== "{" && char !== "[") return undefined;
+      started = true;
+    }
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+    } else if (char === "{" || char === "[") {
+      depth += 1;
+    } else if (char === "}" || char === "]") {
+      depth -= 1;
+      if (depth === 0) return index + 1;
+      if (depth < 0) return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+function parseCompleteJsonValues(content: string): Array<{ value: unknown; end: number }> {
+  const values: Array<{ value: unknown; end: number }> = [];
+  let offset = 0;
+
+  while (offset < content.length) {
+    while (offset < content.length && /\s/.test(content[offset])) offset += 1;
+    if (offset >= content.length) break;
+
+    const end = findJsonValueEnd(content, offset);
+    if (!end) break;
+
+    try {
+      values.push({ value: JSON.parse(content.slice(offset, end)), end });
+      offset = end;
+    } catch {
+      break;
+    }
+  }
+
+  return values;
+}
+
+function parseStateContent(content: string): { state: AppState; recovered: boolean; recoveredValueCount: number; trailingCharacters: number } {
+  try {
+    return {
+      state: JSON.parse(content) as AppState,
+      recovered: false,
+      recoveredValueCount: 1,
+      trailingCharacters: 0
+    };
+  } catch (error) {
+    const values = parseCompleteJsonValues(content);
+    const latest = values.at(-1);
+    if (!latest) throw error;
+    return {
+      state: latest.value as AppState,
+      recovered: true,
+      recoveredValueCount: values.length,
+      trailingCharacters: content.length - latest.end
+    };
+  }
+}
+
+async function writeAtomic(filePath: string, content: string): Promise<void> {
+  await ensureDataDir();
+  const tempFile = path.join(DATA_DIR, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
+  await writeFile(tempFile, content, "utf8");
+  try {
+    await rename(tempFile, filePath);
+  } catch (error) {
+    await unlink(tempFile).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function backupCorruptState(content: string): Promise<string> {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupFile = path.join(DATA_DIR, `app-state.corrupt-${stamp}-${process.pid}.json`);
+  await writeAtomic(backupFile, content);
+  return backupFile;
 }
 
 export async function readState(): Promise<AppState> {
   await ensureDataDir();
   try {
     const content = await readFile(STATE_FILE, "utf8");
-    const state = JSON.parse(content) as AppState;
-    return {
-      ...defaultState(),
-      ...state,
-      seedNodes: state.seedNodes ?? [],
-      settings: {
-        ...defaultSettings(),
-        ...state.settings,
-        sporks: state.settings?.sporks?.length ? state.settings.sporks : defaultSettings().sporks
-      }
-    };
+    const parsed = parseStateContent(content);
+    const state = normalizeState(parsed.state);
+    if (parsed.recovered) {
+      const backupFile = await backupCorruptState(content);
+      await writeState(state);
+      console.warn(
+        `Recovered ${STATE_FILE} from ${parsed.recoveredValueCount} complete JSON value(s); ` +
+          `${parsed.trailingCharacters} trailing character(s) were ignored. Original saved to ${backupFile}.`
+      );
+    }
+    return state;
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       const state = defaultState();
@@ -71,15 +193,20 @@ export async function readState(): Promise<AppState> {
 }
 
 export async function writeState(state: AppState): Promise<void> {
-  await ensureDataDir();
-  const tempFile = `${STATE_FILE}.${process.pid}.tmp`;
-  await writeFile(tempFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-  await rename(tempFile, STATE_FILE);
+  await writeAtomic(STATE_FILE, `${JSON.stringify(state, null, 2)}\n`);
 }
 
 export async function updateState<T>(mutator: (state: AppState) => Promise<T> | T): Promise<T> {
-  const state = await readState();
-  const result = await mutator(state);
-  await writeState(state);
-  return result;
+  const run = async () => {
+    const state = await readState();
+    const result = await mutator(state);
+    await writeState(state);
+    return result;
+  };
+  const next = stateUpdateQueue.then(run, run);
+  stateUpdateQueue = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
 }
