@@ -5,6 +5,7 @@ import {
   FileJson,
   KeyRound,
   LogOut,
+  Plus,
   RefreshCcw,
   Save,
   Search,
@@ -27,6 +28,7 @@ import type {
   ReadinessCheck,
   Role,
   SeedNodeProbeResult,
+  SporkRecord,
   UserOverview
 } from "../shared/types";
 
@@ -934,6 +936,36 @@ function SettingsForm({
     onDirtyChange(settingsKey(draft) !== settingsKey(settings));
   }, [draft, settings, onDirtyChange]);
 
+  function updateSpork(index: number, updates: Partial<SporkRecord>) {
+    setDraft({
+      ...draft,
+      sporks: draft.sporks.map((spork, candidateIndex) => (candidateIndex === index ? { ...spork, ...updates } : spork))
+    });
+  }
+
+  function addSpork() {
+    setDraft({
+      ...draft,
+      sporks: [
+        ...draft.sporks,
+        {
+          id: "",
+          name: "",
+          description: "",
+          activated: true,
+          enforcementHeight: 0
+        }
+      ]
+    });
+  }
+
+  function removeSpork(index: number) {
+    setDraft({
+      ...draft,
+      sporks: draft.sporks.filter((_spork, candidateIndex) => candidateIndex !== index)
+    });
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
@@ -1035,7 +1067,7 @@ function SettingsForm({
             />
           </label>
           <label>
-            <span>go-zenon Ref</span>
+            <span>go-zenon Branch / Tag</span>
             <input
               className="mono"
               value={draft.goZenonRef}
@@ -1043,7 +1075,7 @@ function SettingsForm({
             />
           </label>
           <label>
-            <span>go-zenon Commit</span>
+            <span>go-zenon Commit Pin</span>
             <input
               className="mono"
               value={draft.goZenonCommit ?? ""}
@@ -1052,7 +1084,7 @@ function SettingsForm({
             />
           </label>
           <label>
-            <span>Deployment Ref</span>
+            <span>Deployment Branch / Tag</span>
             <input
               className="mono"
               value={draft.deploymentRef}
@@ -1061,7 +1093,7 @@ function SettingsForm({
           </label>
         </div>
         <label>
-          <span>Deployment Repo</span>
+          <span>Deployment Script Repo</span>
           <input
             className="mono"
             value={draft.deploymentRepo}
@@ -1096,6 +1128,63 @@ function SettingsForm({
           />
           <span>Wipe node data on next Publish Release</span>
         </label>
+      </div>
+      <div className="seedProbe">
+        <div className="panelHeader">
+          <div>
+            <span className="ledger">Genesis</span>
+            <h2>Sporks</h2>
+          </div>
+          <Button variant="secondary" icon={<Plus size={18} />} onClick={addSpork}>
+            Add Spork
+          </Button>
+        </div>
+        <div className="sporkRows">
+          {draft.sporks.map((spork, index) => (
+            <div className="sporkRow" key={`${spork.id || "new"}-${index}`}>
+              <label>
+                <span>Name</span>
+                <input value={spork.name} required onChange={(event) => updateSpork(index, { name: event.target.value })} />
+              </label>
+              <label className="sporkIdField">
+                <span>ID</span>
+                <input
+                  className="mono"
+                  value={spork.id}
+                  required
+                  pattern="[0-9a-fA-F]{64}"
+                  onChange={(event) => updateSpork(index, { id: event.target.value.trim() })}
+                />
+              </label>
+              <label>
+                <span>Activation Height</span>
+                <input
+                  className="mono"
+                  type="number"
+                  min={0}
+                  value={spork.enforcementHeight}
+                  onChange={(event) => updateSpork(index, { enforcementHeight: Number(event.target.value) })}
+                />
+              </label>
+              <label className="checkboxRow sporkActiveRow">
+                <input
+                  type="checkbox"
+                  checked={spork.activated}
+                  onChange={(event) => updateSpork(index, { activated: event.target.checked })}
+                />
+                <span>Active</span>
+              </label>
+              <label className="sporkDescriptionField">
+                <span>Description</span>
+                <input value={spork.description} onChange={(event) => updateSpork(index, { description: event.target.value })} />
+              </label>
+              <Button variant="danger" icon={<Trash2 size={18} />} onClick={() => removeSpork(index)}>
+                Delete
+              </Button>
+            </div>
+          ))}
+          {draft.sporks.length === 0 ? <div className="emptyState">No sporks configured</div> : null}
+        </div>
       </div>
       <div className="seedProbe">
         <div className="panelHeader">

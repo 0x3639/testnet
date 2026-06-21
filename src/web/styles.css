@@ -594,6 +594,47 @@ th {
   margin-top: 0;
 }
 
+.sporkRows {
+  display: grid;
+  gap: 10px;
+}
+
+.sporkRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.9fr) minmax(260px, 1.5fr) minmax(108px, 0.55fr) auto minmax(170px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.sporkRow:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.sporkIdField,
+.sporkDescriptionField {
+  min-width: 0;
+}
+
+.sporkActiveRow {
+  grid-column: auto;
+  min-height: 43px;
+}
+
+.sporkRow .btn {
+  min-height: 43px;
+}
+
+.emptyState {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  padding: 14px;
+  text-align: center;
+}
+
 .seedResult {
   width: 100%;
   border: 1px solid rgba(0, 213, 87, 0.34);
@@ -752,7 +793,8 @@ pre {
   .credentialCard,
   .credentialRows,
   .publishedHeader,
-  .publishedRow {
+  .publishedRow,
+  .sporkRow {
     grid-template-columns: 1fr;
   }
 
