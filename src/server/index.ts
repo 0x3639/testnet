@@ -901,7 +901,7 @@ ZNN_SERVICE_NAME=$SERVICE_NAME
 EOF
 chmod 600 /etc/cron.d/znn-testnet-agent
 
-/usr/local/bin/znn-testnet-agent || true
+flock -n /var/lock/znn-testnet-agent.lock /usr/local/bin/znn-testnet-agent || true
 
 echo "Zenon testnet bootstrap installed. The agent will apply the release after Publish Release."
 `;
