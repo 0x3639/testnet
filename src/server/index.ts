@@ -576,6 +576,7 @@ DEPLOYMENT_DIR="\${ZNN_DEPLOYMENT_DIR:-/opt/zenon-deployment}"
 DEPLOYMENT_MIN_CPU_CORES="\${ZNN_DEPLOYMENT_MIN_CPU_CORES:-2}"
 SERVICE_NAME="\${ZNN_SERVICE_NAME:-go-zenon}"
 RPC_URL="\${ZNN_RPC_URL:-http://127.0.0.1:35997}"
+BOOTSTRAP_TRACE="\${ZNN_BOOTSTRAP_TRACE:-0}"
 
 if ! [[ "$DEPLOYMENT_MIN_CPU_CORES" =~ ^[0-9]+$ ]] || (( DEPLOYMENT_MIN_CPU_CORES < 1 )); then
   DEPLOYMENT_MIN_CPU_CORES=2
@@ -594,11 +595,11 @@ ENV_FILE="\${ZNN_AGENT_ENV_FILE:-/etc/cron.d/znn-testnet-agent}"
 if [[ -z "\${ZNN_BOOTSTRAP_TOKEN:-}" && -r "$ENV_FILE" ]]; then
   while IFS='=' read -r key value; do
     case "$key" in
-      ZNN_BOOTSTRAP_TOKEN|ZNN_TESTNET_URL|ZNN_DIR|ZNN_DEPLOYMENT_DIR|ZNN_DEPLOYMENT_MIN_CPU_CORES|ZNN_RPC_URL|ZNN_SERVICE_NAME|ZNN_AGENT_STATE_DIR)
+      ZNN_BOOTSTRAP_TOKEN|ZNN_TESTNET_URL|ZNN_DIR|ZNN_DEPLOYMENT_DIR|ZNN_DEPLOYMENT_MIN_CPU_CORES|ZNN_RPC_URL|ZNN_SERVICE_NAME|ZNN_AGENT_STATE_DIR|ZNN_BOOTSTRAP_TRACE)
         [[ -n "$value" ]] && export "$key=$value"
         ;;
     esac
-  done < <(grep -E '^(ZNN_BOOTSTRAP_TOKEN|ZNN_TESTNET_URL|ZNN_DIR|ZNN_DEPLOYMENT_DIR|ZNN_DEPLOYMENT_MIN_CPU_CORES|ZNN_RPC_URL|ZNN_SERVICE_NAME|ZNN_AGENT_STATE_DIR)=' "$ENV_FILE" || true)
+  done < <(grep -E '^(ZNN_BOOTSTRAP_TOKEN|ZNN_TESTNET_URL|ZNN_DIR|ZNN_DEPLOYMENT_DIR|ZNN_DEPLOYMENT_MIN_CPU_CORES|ZNN_RPC_URL|ZNN_SERVICE_NAME|ZNN_AGENT_STATE_DIR|ZNN_BOOTSTRAP_TRACE)=' "$ENV_FILE" || true)
 fi
 
 : "\${ZNN_BOOTSTRAP_TOKEN:?Missing ZNN_BOOTSTRAP_TOKEN.}"
@@ -610,6 +611,7 @@ DEPLOYMENT_MIN_CPU_CORES="\${ZNN_DEPLOYMENT_MIN_CPU_CORES:-2}"
 RPC_URL="\${ZNN_RPC_URL:-http://127.0.0.1:35997}"
 SERVICE_NAME="\${ZNN_SERVICE_NAME:-go-zenon}"
 STATE_DIR="\${ZNN_AGENT_STATE_DIR:-/var/lib/znn-testnet-agent}"
+BOOTSTRAP_TRACE="\${ZNN_BOOTSTRAP_TRACE:-0}"
 INSTALL_STATE_FILE="$STATE_DIR/install-state.json"
 STATUS_FILE="$STATE_DIR/status.json"
 
@@ -666,9 +668,13 @@ patch_deployment_preflight() {
   sed -i -E "s/Minimum [0-9]+ required\\./Minimum $DEPLOYMENT_MIN_CPU_CORES required./" "$preflight_file"
   sed -i -E '/mem_total_gb < [0-9]+/,/fi/ s/error_log "Total RAM \\$\\{mem_total_gb\\}GiB detected\\. Minimum [0-9]+GiB required\\."/warn_log "Total RAM \\\${mem_total_gb}GiB detected. 4GiB recommended for go-zenon builds."/' "$preflight_file"
   sed -i -E '/mem_total_gb < [0-9]+/,/fi/ s/^[[:space:]]*return 1[[:space:]]*$/:/' "$preflight_file"
-  echo "Deployment CPU pre-flight minimum: $DEPLOYMENT_MIN_CPU_CORES core(s)"
-  echo "Deployment RAM pre-flight: warning only (4GiB recommended)"
-  grep -E 'cores <|Minimum [0-9]+ required|mem_total_gb <|Total RAM|4GiB recommended' "$preflight_file" || true
+  echo "Deployment pre-flight patch:"
+  echo "  CPU minimum: $DEPLOYMENT_MIN_CPU_CORES core(s)"
+  echo "  RAM check: warning only; 4GiB remains recommended"
+  if [[ "$BOOTSTRAP_TRACE" == "1" || "$BOOTSTRAP_TRACE" == "true" ]]; then
+    echo "Deployment pre-flight patch trace:"
+    grep -E 'cores <|Minimum [0-9]+ required|mem_total_gb <|Total RAM|4GiB recommended' "$preflight_file" | sed 's/^/  /' || true
+  fi
 }
 
 install_release() {
@@ -909,6 +915,7 @@ ZNN_TESTNET_URL=$BASE_URL
 ZNN_DEPLOYMENT_MIN_CPU_CORES=$DEPLOYMENT_MIN_CPU_CORES
 ZNN_RPC_URL=$RPC_URL
 ZNN_SERVICE_NAME=$SERVICE_NAME
+ZNN_BOOTSTRAP_TRACE=$BOOTSTRAP_TRACE
 */1 * * * * root flock -n /var/lock/znn-testnet-agent.lock /usr/local/bin/znn-testnet-agent
 EOF
 chmod 600 /etc/cron.d/znn-testnet-agent
