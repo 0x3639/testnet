@@ -663,6 +663,8 @@ patch_deployment_preflight() {
 
   sed -i -E "s/cores < [0-9]+/cores < $DEPLOYMENT_MIN_CPU_CORES/" "$preflight_file"
   sed -i -E "s/Minimum [0-9]+ required\\./Minimum $DEPLOYMENT_MIN_CPU_CORES required./" "$preflight_file"
+  echo "Deployment CPU pre-flight minimum: $DEPLOYMENT_MIN_CPU_CORES core(s)"
+  grep -E 'cores <|Minimum [0-9]+ required' "$preflight_file" || true
 }
 
 install_release() {
@@ -716,7 +718,11 @@ install_release() {
     patch_deployment_preflight
 
     cd "$DEPLOYMENT_DIR"
-    ./zenon.sh --deploy zenon "$go_repo" "$go_ref"
+    if ! ./zenon.sh --deploy zenon "$go_repo" "$go_ref"; then
+      echo "zenon.sh deployment failed. Last deployment log lines:" >&2
+      tail -120 "$DEPLOYMENT_DIR/.znnsh.log" >&2 2>/dev/null || true
+      return 1
+    fi
 
     if command -v systemctl >/dev/null 2>&1; then
       systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
@@ -885,7 +891,10 @@ if [[ -n "$apply_at" ]]; then
   fi
 fi
 
-install_release "$manifest"
+if ! install_release "$manifest"; then
+  report_status "$manifest" false
+  exit 1
+fi
 report_status "$manifest" false
 AGENT
 
