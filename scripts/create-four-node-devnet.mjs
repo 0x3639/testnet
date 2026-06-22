@@ -319,6 +319,7 @@ async function main() {
         minPillars: 3,
         genesisTimestampSec: Math.floor(Date.now() / 1000),
         seeders: [seedNode.enode],
+        bootstrapPeers: [seedNode.multiaddr],
         sporks: overview.settings.sporks
       })
     },

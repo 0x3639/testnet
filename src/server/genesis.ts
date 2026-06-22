@@ -209,7 +209,8 @@ export function buildNodeConfig(
       MinConnectedPeers: settings.minPillars,
       MaxPeers: Math.max(settings.expectedPillars * 2, 8),
       MaxPendingPeers: Math.max(settings.expectedPillars, 4),
-      Seeders: settings.seeders
+      Seeders: settings.seeders,
+      BootstrapPeers: settings.bootstrapPeers ?? []
     }
   };
 }
@@ -241,6 +242,13 @@ export function readiness(state: AppState): ReadinessCheck[] {
       label: "Seeders",
       ok: state.settings.seeders.length > 0,
       detail: state.settings.seeders.length ? `${state.settings.seeders.length} configured` : "Can be filled in after operators expose nodes"
+    },
+    {
+      label: "Bootstrap peers",
+      ok: (state.settings.bootstrapPeers ?? []).length > 0,
+      detail: (state.settings.bootstrapPeers ?? []).length
+        ? `${(state.settings.bootstrapPeers ?? []).length} configured`
+        : "Required for libp2p after activation"
     }
   ];
 }

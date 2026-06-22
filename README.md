@@ -11,10 +11,10 @@ The backend is Node/Express. The frontend is React/Vite and follows the dark, co
 - Operator registration as either a pillar or a managed non-producing seed node.
 - Generated pillar, reward, and producer wallets for every registered operator.
 - Operator ZIP packages with addresses, encrypted keyfiles, wallet passwords, seed words, producer config, and producer wallet file.
-- Managed seed-node packages with generated network private key, enode, config, and status token.
-- Admin-generated seed node enodes from operator login, node name, public IP, and p2p port.
+- Managed seed-node packages with generated network private key, enode, libp2p multiaddr, config, and status token.
+- Admin-generated seed node enodes and libp2p multiaddrs from operator login, node name, public IP, and p2p port.
 - Admin seed node discovery from a seed node IP address and RPC port.
-- Admin overview of all pillar, reward, producer, and managed seed-node addresses/enodes.
+- Admin overview of all pillar, reward, producer, managed seed-node enodes, and libp2p multiaddrs.
 - Live and finalized `genesis.json` preview.
 - Base non-producing `config.json` preview.
 - Human-readable UTC genesis start time and optional release apply time.
@@ -264,11 +264,11 @@ If you create a Portainer stack with the Web Editor instead of the Git Repositor
 5. Set the go-zenon and deployment repo/ref release target in Settings.
 6. Set **Genesis Start (UTC)** to the intended chain start time. For a coordinated restart, set it comfortably in the future.
 7. Optionally set **Apply Release At (UTC)** so nodes wait before stopping, wiping, downloading artifacts, and restarting.
-8. For managed seed nodes, create an operator login, then use **Seed Nodes** to select that login, enter node name, public IP, and p2p port. The app generates the network private key, public key, and enode immediately.
-9. Add or probe any external seed nodes, and confirm managed seed nodes are present in `Net.Seeders`.
+8. For managed seed nodes, create an operator login, then use **Seed Nodes** to select that login, enter node name, public IP, and p2p port. The app generates the network private key, public key, enode, and libp2p multiaddr immediately.
+9. Add or probe any external seed nodes, and confirm managed seed nodes are present in `Net.Seeders` and `Net.BootstrapPeers`.
 10. Review the generated `genesis.json` and `config.json`.
 11. Finalize the genesis when registrations are complete.
-12. Click **Publish Release** when the current genesis, config, seeders, and release target should become active for operators.
+12. Click **Publish Release** when the current genesis, config, seeders, bootstrap peers, and release target should become active for operators.
 
 Admins can also reset user passwords, delete users, delete pillar registrations, delete managed seed nodes, and download the spork wallet package.
 
@@ -396,7 +396,7 @@ https://<TESTNET_HOST>/config.json
 https://<TESTNET_HOST>/node-plan.json
 ```
 
-Publishing stores a snapshot. If settings, seeders, pillars, finalized genesis data, release target values, or the wipe flag change later, save them as draft changes first, then click **Publish Release** again to update the public files and node plan. Saving settings alone does not force an upgrade or wipe.
+Publishing stores a snapshot. If settings, seeders, bootstrap peers, pillars, finalized genesis data, release target values, or the wipe flag change later, save them as draft changes first, then click **Publish Release** again to update the public files and node plan. Saving settings alone does not force an upgrade or wipe.
 
 `/node-plan.json` includes:
 
@@ -408,15 +408,15 @@ For a coordinated devnet restart, publish the release with `actions.applyAt` bef
 
 ## Seeders And Managed Seed Nodes
 
-For managed seed nodes, create an operator user, then use the admin **Seed Nodes** panel to select that login and enter the seed node name, public IP, and p2p port. The app generates the network private key, derives the enode, saves the enode in draft seeders, and gives the assigned operator a seed-node bootstrap command when they log in. Managed seed nodes are non-producing nodes and are not included in `genesis.json` pillar allocations.
+For managed seed nodes, create an operator user, then use the admin **Seed Nodes** panel to select that login and enter the seed node name, public IP, and p2p port. The app generates the network private key, derives the legacy enode and libp2p multiaddr, saves them in draft `Net.Seeders` and `Net.BootstrapPeers`, and gives the assigned operator a seed-node bootstrap command when they log in. Managed seed nodes are non-producing nodes and are not included in `genesis.json` pillar allocations.
 
-This managed flow does not query the seed node RPC and does not require the seed node to be running before genesis/config are published. The enode is deterministic from the generated network private key plus public IP/port.
+This managed flow does not query the seed node RPC and does not require the seed node to be running before genesis/config are published. The enode and libp2p multiaddr are deterministic from the generated network private key plus public IP/port.
 
-For an external already-running seed node, use the **External Seeder / RPC Probe** panel before publishing the config. The app calls the seed node RPC on port `35997` by default, reads `stats.networkInfo.self.publicKey`, and saves an `enode://<public-key>@<ip>:35995` entry into `Net.Seeders`.
+For an external already-running seed node, use the **External Seeder / RPC Probe** panel before publishing the config. The app calls the seed node RPC on port `35997` by default, reads `stats.networkInfo.self.publicKey`, and saves both an `enode://<public-key>@<ip>:35995` entry into `Net.Seeders` and a `/ip4/<ip>/tcp/35995/p2p/<peer-id>` entry into `Net.BootstrapPeers`.
 
 Use the node's public IP address. If RPC or p2p is exposed on non-default ports, adjust the ports in the external seeder probe form before probing.
 
-The public `config.json` includes the saved seeders and no `Producer` block. Pillar package configs include producer settings and wallet references. Managed seed-node configs exclude their own enode from `Net.Seeders`.
+The public `config.json` includes the saved seeders, saved bootstrap peers, and no `Producer` block. Pillar package configs include producer settings and wallet references. Managed seed-node configs exclude their own enode from `Net.Seeders` and their own multiaddr from `Net.BootstrapPeers`.
 
 ## Genesis Policy
 

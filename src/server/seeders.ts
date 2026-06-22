@@ -1,7 +1,6 @@
 import { isIP } from "node:net";
+import { enodeFromPublicKey, multiaddrFromPublicKey, normalizePublicKey } from "./libp2p.js";
 import type { SeedNodeProbeResult } from "../shared/types.js";
-
-const PUBLIC_KEY_PATTERN = /^[0-9a-fA-F]{128}$/;
 
 interface SeedNodeProbeInput {
   ip: string;
@@ -21,10 +20,6 @@ function hostForUrl(ip: string): string {
   return isIP(ip) === 6 ? `[${ip}]` : ip;
 }
 
-function hostForEnode(ip: string): string {
-  return isIP(ip) === 6 ? `[${ip}]` : ip;
-}
-
 function readPublicKey(result: unknown): string {
   if (!result || typeof result !== "object") {
     throw new Error("Seed RPC returned an invalid stats.networkInfo result");
@@ -40,12 +35,11 @@ function readPublicKey(result: unknown): string {
     throw new Error("Seed RPC response did not include a node public key");
   }
 
-  const publicKey = rawPublicKey.startsWith("0x") ? rawPublicKey.slice(2) : rawPublicKey;
-  if (!PUBLIC_KEY_PATTERN.test(publicKey)) {
+  try {
+    return normalizePublicKey(rawPublicKey);
+  } catch {
     throw new Error("Seed RPC returned a public key that is not a valid enode key");
   }
-
-  return publicKey;
 }
 
 export function validateSeedNodeIp(ip: string): boolean {
@@ -83,13 +77,15 @@ export async function probeSeedNode(input: SeedNodeProbeInput): Promise<SeedNode
   }
 
   const publicKey = readPublicKey(json.result);
-  const enode = `enode://${publicKey}@${hostForEnode(ip)}:${input.p2pPort}`;
+  const enode = enodeFromPublicKey(ip, input.p2pPort, publicKey);
+  const multiaddr = multiaddrFromPublicKey(ip, input.p2pPort, publicKey);
 
   return {
     ip,
     rpcPort: input.rpcPort,
     p2pPort: input.p2pPort,
     publicKey,
-    enode
+    enode,
+    multiaddr
   };
 }

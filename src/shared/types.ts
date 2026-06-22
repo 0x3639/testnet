@@ -44,6 +44,7 @@ export interface SeedNodeRecord {
   p2pPort: number;
   publicKey: string;
   enode: string;
+  multiaddr: string;
   networkPrivateKeyCipher: string;
   statusTokenHash?: string;
   statusTokenCipher?: string;
@@ -76,6 +77,7 @@ export interface NetworkSettings {
   sporkAddress: string;
   sporkWallet?: StoredWallet;
   seeders: string[];
+  bootstrapPeers: string[];
   sporks: SporkRecord[];
 }
 
@@ -132,6 +134,7 @@ export interface PublicSeedNode {
   p2pPort: number;
   publicKey: string;
   enode: string;
+  multiaddr: string;
   createdAt: string;
   packageDownloadedAt?: string;
   nodeStatus?: PublicNodeStatus;
@@ -177,6 +180,7 @@ export interface PublishedArtifacts {
   settings?: NetworkSettingsSnapshot;
   chainIdentifier: number;
   seeders: string[];
+  bootstrapPeers: string[];
 }
 
 export interface PublishedArtifactsInfo {
@@ -186,6 +190,7 @@ export interface PublishedArtifactsInfo {
   nodePlanPath?: string;
   chainIdentifier: number;
   seeders: string[];
+  bootstrapPeers: string[];
   genesisStartAt?: string;
   release?: ReleaseTarget;
   actions?: ReleaseActions;
@@ -275,4 +280,5 @@ export interface SeedNodeProbeResult {
   p2pPort: number;
   publicKey: string;
   enode: string;
+  multiaddr: string;
 }

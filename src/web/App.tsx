@@ -117,6 +117,7 @@ function settingsKey(settings: PublicNetworkSettings): string {
     deploymentRef: settings.deploymentRef,
     wipeDataOnPublish: settings.wipeDataOnPublish,
     seeders: settings.seeders.filter(Boolean),
+    bootstrapPeers: settings.bootstrapPeers.filter(Boolean),
     sporks: settings.sporks
   });
 }
@@ -341,6 +342,7 @@ function OperatorView({ session, refresh }: { session: UserOverview; refresh: ()
               <Field label="P2P Port" value={<span className="mono">{session.seedNode.p2pPort}</span>} />
               <Field label="Public Key" value={<AddressValue value={session.seedNode.publicKey} />} />
               <Field label="Enode" value={<AddressValue value={session.seedNode.enode} />} />
+              <Field label="Multiaddr" value={<AddressValue value={session.seedNode.multiaddr} />} />
             </div>
             <div className="toolbar">
               <Button icon={<Download size={18} />} onClick={() => download("/api/pillar/package")}>
@@ -418,7 +420,7 @@ function OperatorView({ session, refresh }: { session: UserOverview; refresh: ()
           <div className="detailGrid singleColumn">
             <Field label="Producer" value={<span className="mutedText">Not used</span>} />
             <Field label="Pillar Wallet" value={<span className="mutedText">Not used</span>} />
-            <Field label="Seeder" value={<span className="mono">Managed enode</span>} />
+            <Field label="Seeder" value={<span className="mono">Managed enode + multiaddr</span>} />
           </div>
         </section>
       ) : (
@@ -705,6 +707,9 @@ function PublishedArtifacts({ published }: { published: PublishedArtifactsInfo }
         <div className="publishedMeta">
           <span className="mono mutedText">chain {published.chainIdentifier}</span>
           <span className="mono mutedText">{published.seeders.length} seeder{published.seeders.length === 1 ? "" : "s"}</span>
+          <span className="mono mutedText">
+            {published.bootstrapPeers.length} bootstrap peer{published.bootstrapPeers.length === 1 ? "" : "s"}
+          </span>
           {published.genesisStartAt ? <span className="mono mutedText">genesis {formatUtc(published.genesisStartAt)}</span> : null}
           {published.actions?.applyAt ? <span className="statusPill warn">Apply {formatUtc(published.actions.applyAt)}</span> : null}
           {published.release ? <span className="mono mutedText">{published.release.goZenon.ref}</span> : null}
@@ -922,7 +927,7 @@ function SettingsForm({
   const [seedIp, setSeedIp] = useState("");
   const [seedRpcPort, setSeedRpcPort] = useState(35997);
   const [seedP2pPort, setSeedP2pPort] = useState(35995);
-  const [seedResult, setSeedResult] = useState("");
+  const [seedResult, setSeedResult] = useState<SeedNodeProbeResult | null>(null);
   const [probing, setProbing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -935,6 +940,7 @@ function SettingsForm({
       await onSave({
         ...draft,
         seeders: draft.seeders.filter(Boolean),
+        bootstrapPeers: draft.bootstrapPeers.filter(Boolean),
         sporks: draft.sporks
       });
     } catch (err) {
@@ -947,7 +953,7 @@ function SettingsForm({
   async function probeSeed() {
     setProbing(true);
     setError("");
-    setSeedResult("");
+    setSeedResult(null);
     try {
       const result = await onProbeSeed({
         ip: seedIp,
@@ -955,7 +961,7 @@ function SettingsForm({
         p2pPort: seedP2pPort
       });
       setDraft(result.settings);
-      setSeedResult(result.seed.enode);
+      setSeedResult(result.seed);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -1136,9 +1142,14 @@ function SettingsForm({
           </Button>
         </div>
         {seedResult ? (
-          <button className="seedResult mono" type="button" onClick={() => copy(seedResult)} title="Copy enode">
-            {seedResult}
-          </button>
+          <div className="resultStack">
+            <button className="seedResult mono" type="button" onClick={() => copy(seedResult.enode)} title="Copy enode">
+              {seedResult.enode}
+            </button>
+            <button className="seedResult mono" type="button" onClick={() => copy(seedResult.multiaddr)} title="Copy libp2p multiaddr">
+              {seedResult.multiaddr}
+            </button>
+          </div>
         ) : null}
       </div>
       <label>
@@ -1146,6 +1157,14 @@ function SettingsForm({
         <textarea
           value={draft.seeders.join("\n")}
           onChange={(event) => setDraft({ ...draft, seeders: event.target.value.split("\n").map((line) => line.trim()) })}
+          rows={4}
+        />
+      </label>
+      <label>
+        <span>Bootstrap Peers</span>
+        <textarea
+          value={draft.bootstrapPeers.join("\n")}
+          onChange={(event) => setDraft({ ...draft, bootstrapPeers: event.target.value.split("\n").map((line) => line.trim()) })}
           rows={4}
         />
       </label>
@@ -1206,7 +1225,8 @@ function GenesisSporkEditor({
     try {
       await onSave({
         ...draft,
-        seeders: draft.seeders.filter(Boolean)
+        seeders: draft.seeders.filter(Boolean),
+        bootstrapPeers: draft.bootstrapPeers.filter(Boolean)
       });
     } catch (err) {
       setError((err as Error).message);
@@ -1286,7 +1306,9 @@ function GenesisSporkEditor({
 function AdminView({ session, refresh, refreshState }: { session: AdminOverview; refresh: () => Promise<void>; refreshState: RefreshState }) {
   const [tab, setTab] = useState<"genesis" | "config">("genesis");
   const [settingsDraft, setSettingsDraft] = useState(session.settings);
-  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [settingsBase, setSettingsBase] = useState(session.settings);
+  const settingsBaseRef = useRef(session.settings);
+  const settingsDirty = useMemo(() => settingsKey(settingsDraft) !== settingsKey(settingsBase), [settingsDraft, settingsBase]);
   const json = useMemo(() => JSON.stringify(tab === "genesis" ? session.genesis : session.configTemplate, null, 2), [session, tab]);
   const telemetryNodes: TelemetryNode[] = useMemo(
     () => [
@@ -1306,12 +1328,11 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
     [session.pillars, session.seedNodes]
   );
   useEffect(() => {
-    setSettingsDraft(session.settings);
-    setSettingsDirty(false);
+    const previousBase = settingsBaseRef.current;
+    settingsBaseRef.current = session.settings;
+    setSettingsBase(session.settings);
+    setSettingsDraft((currentDraft) => (settingsKey(currentDraft) === settingsKey(previousBase) ? session.settings : currentDraft));
   }, [session.settings]);
-  useEffect(() => {
-    setSettingsDirty(settingsKey(settingsDraft) !== settingsKey(session.settings));
-  }, [settingsDraft, session.settings]);
   const userById = useMemo(() => new Map(session.users.map((user) => [user.id, user])), [session.users]);
   const availableSeedNodeUsers = useMemo(
     () => session.users.filter((user) => user.role === "user" && !user.nodeName),
@@ -1327,7 +1348,7 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
   });
   const [seedNodeBusy, setSeedNodeBusy] = useState(false);
   const [seedNodeError, setSeedNodeError] = useState("");
-  const [generatedSeedEnode, setGeneratedSeedEnode] = useState("");
+  const [generatedSeedNode, setGeneratedSeedNode] = useState<PublicSeedNode | null>(null);
 
   async function saveSettings(settings: PublicNetworkSettings) {
     await api("/api/admin/settings", {
@@ -1346,6 +1367,7 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
         deploymentRef: settings.deploymentRef,
         wipeDataOnPublish: settings.wipeDataOnPublish,
         seeders: settings.seeders,
+        bootstrapPeers: settings.bootstrapPeers,
         sporks: settings.sporks
       })
     });
@@ -1397,13 +1419,13 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
     event.preventDefault();
     setSeedNodeBusy(true);
     setSeedNodeError("");
-    setGeneratedSeedEnode("");
+    setGeneratedSeedNode(null);
     try {
       const result = await api<{ seedNode: PublicSeedNode; settings: PublicNetworkSettings }>("/api/admin/seed-nodes", {
         method: "POST",
         body: JSON.stringify(seedNodeInput)
       });
-      setGeneratedSeedEnode(result.seedNode.enode);
+      setGeneratedSeedNode(result.seedNode);
       setSeedNodeInput({
         userId: "",
         nodeName: "",
@@ -1571,14 +1593,19 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
             />
           </label>
           <Button type="submit" icon={<Server size={18} />} disabled={seedNodeBusy || !availableSeedNodeUsers.length}>
-            {seedNodeBusy ? "Generating" : "Generate Enode"}
+            {seedNodeBusy ? "Generating" : "Generate Seed Node"}
           </Button>
         </form>
         {seedNodeError ? <div className="alert">{seedNodeError}</div> : null}
-        {generatedSeedEnode ? (
-          <button className="seedResult mono" type="button" onClick={() => copy(generatedSeedEnode)} title="Copy generated enode">
-            {generatedSeedEnode}
-          </button>
+        {generatedSeedNode ? (
+          <div className="resultStack">
+            <button className="seedResult mono" type="button" onClick={() => copy(generatedSeedNode.enode)} title="Copy generated enode">
+              {generatedSeedNode.enode}
+            </button>
+            <button className="seedResult mono" type="button" onClick={() => copy(generatedSeedNode.multiaddr)} title="Copy generated libp2p multiaddr">
+              {generatedSeedNode.multiaddr}
+            </button>
+          </div>
         ) : null}
         <div className="tableWrap">
           <table>
@@ -1590,6 +1617,7 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
                 <th>P2P</th>
                 <th>Public Key</th>
                 <th>Enode</th>
+                <th>Multiaddr</th>
                 <th>Created</th>
                 <th>Actions</th>
               </tr>
@@ -1606,6 +1634,9 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
                   </td>
                   <td>
                     <AddressValue value={seedNode.enode} />
+                  </td>
+                  <td>
+                    <AddressValue value={seedNode.multiaddr} />
                   </td>
                   <td className="mono">{new Date(seedNode.createdAt).toLocaleString()}</td>
                   <td>

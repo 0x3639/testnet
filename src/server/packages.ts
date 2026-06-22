@@ -150,7 +150,8 @@ export async function buildSeedNodePackage(settings: NetworkSettings, seedNode: 
     Name: seedNode.nodeName,
     Net: {
       ...config.Net,
-      Seeders: settings.seeders.filter((seeder) => seeder !== seedNode.enode)
+      Seeders: settings.seeders.filter((seeder) => seeder !== seedNode.enode),
+      BootstrapPeers: (settings.bootstrapPeers ?? []).filter((bootstrapPeer) => bootstrapPeer !== seedNode.multiaddr)
     }
   };
 
@@ -162,6 +163,7 @@ export async function buildSeedNodePackage(settings: NetworkSettings, seedNode: 
       p2pPort: seedNode.p2pPort,
       publicKey: seedNode.publicKey,
       enode: seedNode.enode,
+      multiaddr: seedNode.multiaddr,
       nodeStatus: {
         endpoint: "/api/bootstrap/status",
         tokenFile: "node/status-token.txt",

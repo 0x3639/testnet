@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_SPORKS, DEFAULT_SPORKS_VERSION } from "./constants.js";
+import { multiaddrFromEnode, multiaddrFromPublicKey } from "./libp2p.js";
 import type { AppState, NetworkSettings } from "../shared/types.js";
 
 const DATA_DIR = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
@@ -29,6 +30,7 @@ function defaultSettings(): NetworkSettings {
     wipeDataOnPublish: false,
     sporkAddress: "",
     seeders: [],
+    bootstrapPeers: [],
     sporks: DEFAULT_SPORKS.map((spork) => ({ ...spork }))
   };
 }
@@ -54,21 +56,47 @@ function mergeDefaultSporks(sporks: NetworkSettings["sporks"], currentVersion?: 
   ];
 }
 
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+}
+
+function safeMultiaddrFromPublicKey(publicIp: string, p2pPort: number, publicKey: string): string | undefined {
+  try {
+    return multiaddrFromPublicKey(publicIp, p2pPort, publicKey);
+  } catch {
+    return undefined;
+  }
+}
+
 function normalizeState(state: Partial<AppState>): AppState {
   const defaults = defaultState();
   const settingsDefaults = defaultSettings();
   const settings = state.settings ?? ({} as Partial<NetworkSettings>);
   const sporks = settings.sporks?.length ? settings.sporks : settingsDefaults.sporks;
+  const seeders = settings.seeders ?? settingsDefaults.seeders;
+  const seedNodes = (state.seedNodes ?? []).map((seedNode) => ({
+    ...seedNode,
+    multiaddr:
+      seedNode.multiaddr ||
+      safeMultiaddrFromPublicKey(seedNode.publicIp, seedNode.p2pPort, seedNode.publicKey) ||
+      ""
+  }));
+  const derivedBootstrapPeers = uniqueStrings([
+    ...seedNodes.map((seedNode) => seedNode.multiaddr),
+    ...seeders.map((seeder) => multiaddrFromEnode(seeder))
+  ]);
   return {
     ...defaults,
     ...state,
     users: state.users ?? [],
     sessions: state.sessions ?? [],
     pillars: state.pillars ?? [],
-    seedNodes: state.seedNodes ?? [],
+    seedNodes,
     settings: {
       ...settingsDefaults,
       ...settings,
+      seeders,
+      bootstrapPeers: settings.bootstrapPeers ?? derivedBootstrapPeers,
       sporks: mergeDefaultSporks(sporks, state.defaultSporksVersion)
     },
     defaultSporksVersion: DEFAULT_SPORKS_VERSION

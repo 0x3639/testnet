@@ -683,6 +683,11 @@ th {
   cursor: pointer;
 }
 
+.resultStack {
+  display: grid;
+  gap: 8px;
+}
+
 .jsonPanel {
   min-width: 0;
 }
