@@ -8,6 +8,7 @@ import { createAccount, resetAccountPassword } from "./accounts.js";
 import { decryptText, encryptText, randomId, sha256 } from "./crypto.js";
 import { buildGenesis, buildNodeConfig, readiness, toPublicPillar } from "./genesis.js";
 import { buildPillarPackage, buildSeedNodePackage, buildSporkPackage } from "./packages.js";
+import { enodeFromPublicKey, multiaddrFromEnode, multiaddrFromPublicKey } from "./libp2p.js";
 import { probeSeedNode, validateSeedNodeIp } from "./seeders.js";
 import { readState, updateState } from "./storage.js";
 import { createWallet, toStoredWallet } from "./wallets.js";
@@ -88,6 +89,7 @@ const settingsSchema = z.object({
   deploymentRef: z.string().trim().min(1).max(160),
   wipeDataOnPublish: z.boolean().default(false),
   seeders: z.array(z.string().trim().min(1)).max(100),
+  bootstrapPeers: z.array(z.string().trim().min(1)).max(100).optional(),
   sporks: z.array(
     z.object({
       id: z.string().regex(/^[0-9a-fA-F]{64}$/),
@@ -121,6 +123,10 @@ const optionalNullableText = (max: number) =>
     .nullish()
     .transform((value) => value ?? undefined);
 const optionalNullableInt = (schema: z.ZodNumber) => schema.nullish().transform((value) => value ?? undefined);
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+}
 
 const nodeStatusReportSchema = z.object({
   eventId: z.string().trim().max(120).optional(),
@@ -194,6 +200,7 @@ function publicSeedNode(record: SeedNodeRecord) {
     p2pPort: record.p2pPort,
     publicKey: record.publicKey,
     enode: record.enode,
+    multiaddr: record.multiaddr,
     createdAt: record.createdAt,
     packageDownloadedAt: record.packageDownloadedAt,
     nodeStatus: record.nodeStatus
@@ -310,7 +317,8 @@ async function createPillar(userId: string, pillarName: string) {
 
 async function createSeedNode(userId: string, nodeName: string, publicIp: string, p2pPort: number) {
   const { privateKey, publicKey } = createNetworkKey();
-  const enode = `enode://${publicKey}@${publicIp}:${p2pPort}`;
+  const enode = enodeFromPublicKey(publicIp, p2pPort, publicKey);
+  const multiaddr = multiaddrFromPublicKey(publicIp, p2pPort, publicKey);
 
   return updateState((state) => {
     const user = state.users.find((candidate) => candidate.id === userId);
@@ -341,12 +349,14 @@ async function createSeedNode(userId: string, nodeName: string, publicIp: string
       p2pPort,
       publicKey,
       enode,
+      multiaddr,
       networkPrivateKeyCipher: encryptText(privateKey),
       ...createStatusTokenFields(),
       createdAt: new Date().toISOString()
     };
     state.seedNodes.push(record);
     state.settings.seeders = Array.from(new Set([...state.settings.seeders, enode]));
+    state.settings.bootstrapPeers = Array.from(new Set([...(state.settings.bootstrapPeers ?? []), multiaddr]));
     return record;
   });
 }
@@ -376,6 +386,7 @@ function publishedInfo(published?: PublishedArtifacts): PublishedArtifactsInfo |
     nodePlanPath: published.nodePlan ? PUBLIC_NODE_PLAN_PATH : undefined,
     chainIdentifier: published.chainIdentifier,
     seeders: published.seeders,
+    bootstrapPeers: published.bootstrapPeers ?? [],
     genesisStartAt: published.nodePlan?.genesisStartAt,
     release: published.nodePlan
       ? {
@@ -404,6 +415,7 @@ function genesisSettingsKey(settings: NetworkSettings): string {
     minPillars: settings.minPillars,
     genesisTimestampSec: settings.genesisTimestampSec,
     seeders: settings.seeders,
+    bootstrapPeers: settings.bootstrapPeers,
     sporks: settings.sporks
   });
 }
@@ -452,7 +464,8 @@ function seedNodeConfigForDeployment(settings: NetworkSettings, seedNode: SeedNo
     Producer: undefined,
     Net: {
       ...config.Net,
-      Seeders: settings.seeders.filter((seeder) => seeder !== seedNode.enode)
+      Seeders: settings.seeders.filter((seeder) => seeder !== seedNode.enode),
+      BootstrapPeers: (settings.bootstrapPeers ?? []).filter((bootstrapPeer) => bootstrapPeer !== seedNode.multiaddr)
     }
   };
 }
@@ -527,6 +540,7 @@ function bootstrapManifest(request: express.Request, published: PublishedArtifac
     p2pPort: node.seedNode.p2pPort,
     publicKey: node.seedNode.publicKey,
     enode: node.seedNode.enode,
+    multiaddr: node.seedNode.multiaddr,
     networkPrivateKeyUrl: `${origin}/api/bootstrap/network-private-key`
   };
 }
@@ -1223,11 +1237,15 @@ async function main() {
 
     const settings = await updateState((state) => {
       const beforeGenesisSettings = genesisSettingsKey(state.settings);
+      const bootstrapPeers =
+        parsed.data.bootstrapPeers ??
+        uniqueStrings([...(state.settings.bootstrapPeers ?? []), ...parsed.data.seeders.map((seeder) => multiaddrFromEnode(seeder))]);
       state.settings = {
         ...state.settings,
         ...parsed.data,
         minPillars: Math.min(parsed.data.minPillars, parsed.data.expectedPillars),
-        goZenonCommit: parsed.data.goZenonCommit || undefined
+        goZenonCommit: parsed.data.goZenonCommit || undefined,
+        bootstrapPeers
       };
       if (genesisSettingsKey(state.settings) !== beforeGenesisSettings) {
         state.finalizedGenesis = undefined;
@@ -1290,13 +1308,16 @@ async function main() {
         }
 
         const hadPillar = state.pillars.some((pillar) => pillar.userId === user.id);
-        const deletedSeedEnodes = state.seedNodes.filter((seedNode) => seedNode.userId === user.id).map((seedNode) => seedNode.enode);
+        const deletedSeedNodes = state.seedNodes.filter((seedNode) => seedNode.userId === user.id);
+        const deletedSeedEnodes = deletedSeedNodes.map((seedNode) => seedNode.enode);
+        const deletedBootstrapPeers = deletedSeedNodes.map((seedNode) => seedNode.multiaddr);
         state.users = state.users.filter((candidate) => candidate.id !== user.id);
         state.sessions = state.sessions.filter((session) => session.userId !== user.id);
         state.pillars = state.pillars.filter((pillar) => pillar.userId !== user.id);
         state.seedNodes = state.seedNodes.filter((seedNode) => seedNode.userId !== user.id);
         if (deletedSeedEnodes.length) {
           state.settings.seeders = state.settings.seeders.filter((seeder) => !deletedSeedEnodes.includes(seeder));
+          state.settings.bootstrapPeers = (state.settings.bootstrapPeers ?? []).filter((bootstrapPeer) => !deletedBootstrapPeers.includes(bootstrapPeer));
         }
         if (hadPillar) state.finalizedGenesis = undefined;
 
@@ -1334,6 +1355,7 @@ async function main() {
 
         const [deleted] = state.seedNodes.splice(index, 1);
         state.settings.seeders = state.settings.seeders.filter((seeder) => seeder !== deleted.enode);
+        state.settings.bootstrapPeers = (state.settings.bootstrapPeers ?? []).filter((bootstrapPeer) => bootstrapPeer !== deleted.multiaddr);
         return publicSeedNode(deleted);
       });
       response.json({ seedNode });
@@ -1373,6 +1395,7 @@ async function main() {
       const seed = await probeSeedNode(parsed.data);
       const settings = await updateState((state) => {
         state.settings.seeders = Array.from(new Set([...state.settings.seeders, seed.enode]));
+        state.settings.bootstrapPeers = Array.from(new Set([...(state.settings.bootstrapPeers ?? []), seed.multiaddr]));
         return publicSettings(state.settings);
       });
       response.json({ seed, settings });
@@ -1412,7 +1435,8 @@ async function main() {
         nodePlan: buildPublishedNodePlan(settings, now, state.finalizedGenesis.finalizedAt),
         settings,
         chainIdentifier: settings.chainIdentifier,
-        seeders: [...settings.seeders]
+        seeders: [...settings.seeders],
+        bootstrapPeers: [...(settings.bootstrapPeers ?? [])]
       };
       state.settings.wipeDataOnPublish = false;
       state.settings.releaseApplyAtSec = undefined;

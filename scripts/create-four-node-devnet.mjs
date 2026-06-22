@@ -41,6 +41,51 @@ function generateNodeKey() {
   return { privateKey, publicKey };
 }
 
+// base58btc (Bitcoin alphabet), used to encode the libp2p peer ID.
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function base58btc(bytes) {
+  let zeros = 0;
+  while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+  const digits = [0];
+  for (let i = zeros; i < bytes.length; i++) {
+    let carry = bytes[i];
+    for (let j = 0; j < digits.length; j++) {
+      carry += digits[j] << 8;
+      digits[j] = carry % 58;
+      carry = (carry / 58) | 0;
+    }
+    while (carry) {
+      digits.push(carry % 58);
+      carry = (carry / 58) | 0;
+    }
+  }
+  let out = "1".repeat(zeros);
+  for (let i = digits.length - 1; i >= 0; i--) out += BASE58_ALPHABET[digits[i]];
+  return out;
+}
+
+// Derive a node's libp2p peer ID ("16Uiu2HA…") from its secp256k1 public key,
+// matching go-zenon's libp2p.PeerIDFromECDSA. The peer ID is the identity
+// multihash of the protobuf-wrapped *compressed* public key (the compressed
+// form is short enough that libp2p inlines it rather than sha256-hashing).
+function libp2pPeerId(publicKey) {
+  // publicKey is the 64-byte uncompressed key (x||y, no 0x04 prefix). Compress
+  // it: 0x02 prefix when y is even, 0x03 when odd, followed by the x coordinate.
+  const x = publicKey.slice(0, 64);
+  const yIsOdd = parseInt(publicKey.slice(126, 128), 16) % 2 === 1;
+  const compressed = Buffer.from((yIsOdd ? "03" : "02") + x, "hex"); // 33 bytes
+  const proto = Buffer.concat([
+    Buffer.from([0x08, 0x02, 0x12, compressed.length]), // PublicKey{ Type=SECP256K1(2), Data }
+    compressed
+  ]);
+  const multihash = Buffer.concat([Buffer.from([0x00, proto.length]), proto]); // identity (0x00)
+  return base58btc(multihash);
+}
+
+function multiaddrFor(node) {
+  return `/ip4/${node.ip}/tcp/35995/p2p/${libp2pPeerId(node.nodeKey.publicKey)}`;
+}
+
 function pretty(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
@@ -119,7 +164,10 @@ function nodeConfigFromPackage(config, role) {
       MinConnectedPeers: 3,
       MaxPeers: 8,
       MaxPendingPeers: 4,
-      Seeders: [seedNode.enode, ...roles.filter((candidate) => candidate.role !== role.role).map((candidate) => candidate.enode)]
+      Seeders: [seedNode.enode, ...roles.filter((candidate) => candidate.role !== role.role).map((candidate) => candidate.enode)],
+      // libp2p (post-activation): bootstrap off the single seed node and
+      // discover the other pillars through the DHT.
+      BootstrapPeers: [seedNode.multiaddr]
     }
   };
 }
@@ -150,7 +198,10 @@ function seedNodeConfig() {
       MinConnectedPeers: 0,
       MaxPeers: 16,
       MaxPendingPeers: 8,
-      Seeders: roles.map((role) => role.enode)
+      Seeders: roles.map((role) => role.enode),
+      // The seed is itself the network's single bootstrap peer, so it has no
+      // upstream to bootstrap from; it relies on inbound peers and its peerdb.
+      BootstrapPeers: []
     }
   };
 }
@@ -197,11 +248,13 @@ function validateConfigs(configs) {
   const checks = [];
   const expect = (label, ok, detail = "") => checks.push({ label, ok, detail });
   const enodePattern = /^enode:\/\/[0-9a-f]{128}@10\.88\.0\.(9|10|11|12|13):35995$/i;
+  const multiaddrPattern = /^\/ip4\/10\.88\.0\.(9|10|11|12|13)\/tcp\/35995\/p2p\/16Uiu2HA[1-9A-HJ-NP-Za-km-z]+$/;
 
   expect("seed config exists", Boolean(configs.seed));
   expect("seed has no producer", !("Producer" in configs.seed));
   expect("seed seeder count", configs.seed.Net.Seeders.length === 4, String(configs.seed.Net.Seeders.length));
   expect("seed seeder syntax", configs.seed.Net.Seeders.every((seeder) => enodePattern.test(seeder)));
+  expect("seed bootstrap empty", configs.seed.Net.BootstrapPeers.length === 0, String(configs.seed.Net.BootstrapPeers.length));
 
   for (const role of roles) {
     const config = configs[role.role];
@@ -211,6 +264,9 @@ function validateConfigs(configs) {
     expect(`${role.role} includes seed`, config.Net.Seeders[0] === seedNode.enode);
     expect(`${role.role} excludes self`, !config.Net.Seeders.includes(role.enode));
     expect(`${role.role} seeder syntax`, config.Net.Seeders.every((seeder) => enodePattern.test(seeder)));
+    expect(`${role.role} bootstrap count`, config.Net.BootstrapPeers.length === 1, String(config.Net.BootstrapPeers.length));
+    expect(`${role.role} bootstrap is seed`, config.Net.BootstrapPeers[0] === seedNode.multiaddr);
+    expect(`${role.role} bootstrap syntax`, config.Net.BootstrapPeers.every((peer) => multiaddrPattern.test(peer)));
   }
 
   return checks;
@@ -222,11 +278,13 @@ async function main() {
 
   seedNode.nodeKey = generateNodeKey();
   seedNode.enode = `enode://${seedNode.nodeKey.publicKey}@${seedNode.ip}:35995`;
+  seedNode.multiaddr = multiaddrFor(seedNode);
 
   for (const role of roles) {
     role.password = randomPassword();
     role.nodeKey = generateNodeKey();
     role.enode = `enode://${role.nodeKey.publicKey}@${role.ip}:35995`;
+    role.multiaddr = multiaddrFor(role);
     await request(
       "/api/admin/users",
       {
@@ -261,6 +319,7 @@ async function main() {
         minPillars: 3,
         genesisTimestampSec: Math.floor(Date.now() / 1000),
         seeders: [seedNode.enode],
+        bootstrapPeers: [seedNode.multiaddr],
         sporks: overview.settings.sporks
       })
     },
@@ -353,9 +412,10 @@ ${roles.concat(seedNode).map((role) => `  ${role.role}-data:`).join("\n")}
       chainIdentifier: CHAIN_IDENTIFIER,
       extraData: EXTRA_DATA,
       genesisTimestampSec: overview.settings.genesisTimestampSec,
-      seedNode: { role: seedNode.role, ip: seedNode.ip, httpPort: seedNode.httpPort, wsPort: seedNode.wsPort, enode: seedNode.enode },
-      seeders: roles.map((role) => ({ role: role.role, ip: role.ip, enode: role.enode })),
+      seedNode: { role: seedNode.role, ip: seedNode.ip, httpPort: seedNode.httpPort, wsPort: seedNode.wsPort, enode: seedNode.enode, multiaddr: seedNode.multiaddr },
+      seeders: roles.map((role) => ({ role: role.role, ip: role.ip, enode: role.enode, multiaddr: role.multiaddr })),
       configuredSeeders: [seedNode.enode],
+      configuredBootstrapPeers: [seedNode.multiaddr],
       pillars: roles.map((role) => ({
         role: role.role,
         username: role.username,
@@ -390,7 +450,9 @@ HTTP RPC ports:
 - seed: http://127.0.0.1:${seedNode.httpPort}
 ${roles.map((role) => `- ${role.role} / ${role.pillarName}: http://127.0.0.1:${role.httpPort}`).join("\n")}
 
-The four pillar configs use the seed node enode first, followed by the other local pillar enodes as deterministic fallback peers.
+The four pillar configs use the seed node enode first, followed by the other local pillar enodes as deterministic fallback peers (legacy p2p, used before the libp2p activation spork).
+
+For libp2p (post-activation) each pillar carries a single \`BootstrapPeers\` entry — the seed node's multiaddr (\`/ip4/<ip>/tcp/35995/p2p/<peer-id>\`) — and discovers the other pillars through the DHT. The seed node has an empty \`BootstrapPeers\` list as it is the network's bootstrap peer.
 
 The generated operator ZIPs and login credentials are in \`operators/\` and \`operator-logins.txt\`.
 Treat wallet seed phrases, wallet passwords, and network-private-key files as secret material.
