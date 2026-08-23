@@ -1,4 +1,4 @@
-import { hashPassword, randomId, randomPassword } from "./crypto.js";
+import { hashPassword, randomId, randomPassword, sha256 } from "./crypto.js";
 import { updateState } from "./storage.js";
 import type { AuthUser, Role } from "../shared/types.js";
 
@@ -29,16 +29,17 @@ export async function createAccount(username: string, role: Role, password = ran
   return { user, password };
 }
 
-export async function resetAccountPassword(userId: string, password: string, keepActiveSessionUserId?: string): Promise<AuthUser> {
+export async function resetAccountPassword(userId: string, password: string, keepActiveSessionToken?: string): Promise<AuthUser> {
   const passwordHash = await hashPassword(password);
+  const keepActiveSessionTokenHash = keepActiveSessionToken ? sha256(keepActiveSessionToken) : undefined;
   return updateState((state) => {
     const user = state.users.find((candidate) => candidate.id === userId);
     if (!user) throw new Error("User not found");
 
     user.passwordHash = passwordHash;
-    if (user.id !== keepActiveSessionUserId) {
-      state.sessions = state.sessions.filter((session) => session.userId !== user.id);
-    }
+    state.sessions = state.sessions.filter(
+      (session) => session.userId !== user.id || (keepActiveSessionTokenHash !== undefined && session.tokenHash === keepActiveSessionTokenHash)
+    );
 
     return {
       id: user.id,

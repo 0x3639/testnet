@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_SPORKS, DEFAULT_SPORKS_VERSION } from "./constants.js";
 import { multiaddrFromEnode, multiaddrFromPublicKey } from "./libp2p.js";
@@ -7,6 +7,8 @@ import type { AppState, NetworkSettings } from "../shared/types.js";
 
 const DATA_DIR = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
 const STATE_FILE = path.join(DATA_DIR, "app-state.json");
+const PRIVATE_DIRECTORY_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
 const DEFAULT_GO_ZENON_REPO = process.env.GO_ZENON_REPO ?? "https://github.com/zenon-network/go-zenon.git";
 const DEFAULT_GO_ZENON_REF = process.env.GO_ZENON_REF ?? "master";
 const DEFAULT_GO_ZENON_COMMIT = process.env.GO_ZENON_COMMIT;
@@ -104,7 +106,13 @@ function normalizeState(state: Partial<AppState>): AppState {
 }
 
 async function ensureDataDir(): Promise<void> {
-  await mkdir(DATA_DIR, { recursive: true });
+  await mkdir(DATA_DIR, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+  await chmod(DATA_DIR, PRIVATE_DIRECTORY_MODE);
+  try {
+    await chmod(STATE_FILE, PRIVATE_FILE_MODE);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
 }
 
 function findJsonValueEnd(content: string, start: number): number | undefined {
@@ -192,9 +200,10 @@ function parseStateContent(content: string): { state: AppState; recovered: boole
 async function writeAtomic(filePath: string, content: string): Promise<void> {
   await ensureDataDir();
   const tempFile = path.join(DATA_DIR, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
-  await writeFile(tempFile, content, "utf8");
+  await writeFile(tempFile, content, { encoding: "utf8", mode: PRIVATE_FILE_MODE, flag: "wx" });
   try {
     await rename(tempFile, filePath);
+    await chmod(filePath, PRIVATE_FILE_MODE);
   } catch (error) {
     await unlink(tempFile).catch(() => undefined);
     throw error;

@@ -15,7 +15,9 @@
     "build:web": "vite build",
     "start": "node dist/server/server/index.js",
     "account": "tsx src/server/cli.ts",
-    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json --noEmit"
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test": "npm run test:security",
+    "test:security": "npm run build:api && node --test tests/security-hardening.test.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",

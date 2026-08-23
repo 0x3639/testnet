@@ -194,12 +194,13 @@ export function buildNodeConfig(
     RPC: {
       EnableHTTP: true,
       EnableWS: true,
-      HTTPHost: "0.0.0.0",
+      HTTPHost: "127.0.0.1",
       HTTPPort: 35997,
-      WSHost: "0.0.0.0",
+      WSHost: "127.0.0.1",
       WSPort: 35998,
-      HTTPCors: ["*"],
-      WSOrigins: ["*"],
+      HTTPVirtualHosts: ["localhost", "127.0.0.1"],
+      HTTPCors: [],
+      WSOrigins: [],
       Endpoints: ["ledger", "stats", "embedded", "subscribe"]
     },
     Net: {

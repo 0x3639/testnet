@@ -1278,10 +1278,9 @@ async function main() {
       return;
     }
 
-    const admin = (request as AuthedRequest).user;
     const userId = String(request.params.userId);
     try {
-      await resetAccountPassword(userId, parsed.data.password, admin.id);
+      await resetAccountPassword(userId, parsed.data.password, sessionTokenFromRequest(request));
       const state = await readState();
       response.json({ user: managedUsers(state).find((candidate) => candidate.id === userId) });
     } catch (error: unknown) {

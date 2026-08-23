@@ -1,5 +1,5 @@
 import { createECDH, randomBytes } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import JSZip from "jszip";
 
@@ -16,6 +16,8 @@ const ZNN_ZTS = "zts1znnxxxxxxxxxxxxx9z4ulx";
 const QSR_ZTS = "zts1qsrxxxxxxxxxxxxxmrhjll";
 const PILLAR_CONTRACT = "z1qxemdeddedxpyllarxxxxxxxxxxxxxxxsy3fmg";
 const PLASMA_CONTRACT = "z1qxemdeddedxplasmaxxxxxxxxxxxxxxxxsctrp";
+const PRIVATE_DIRECTORY_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
 
 const seedNode = { role: "seed", ip: "10.88.0.9", httpPort: 36000, wsPort: 36100 };
 
@@ -25,6 +27,16 @@ const roles = [
   { role: "pillar3", pillarName: "dev3", username: "devnet-node-3", ip: "10.88.0.12", httpPort: 36003, wsPort: 36103 },
   { role: "pillar4", pillarName: "dev4", username: "devnet-node-4", ip: "10.88.0.13", httpPort: 36004, wsPort: 36104 }
 ];
+
+async function ensurePrivateDir(dirPath) {
+  await mkdir(dirPath, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+  await chmod(dirPath, PRIVATE_DIRECTORY_MODE);
+}
+
+async function writePrivateFile(filePath, data) {
+  await writeFile(filePath, data, { mode: PRIVATE_FILE_MODE });
+  await chmod(filePath, PRIVATE_FILE_MODE);
+}
 
 function randomPassword() {
   return randomBytes(18).toString("base64url");
@@ -151,9 +163,9 @@ function nodeConfigFromPackage(config, role) {
       HTTPPort: 35997,
       WSHost: "0.0.0.0",
       WSPort: 35998,
-      HTTPVirtualHosts: ["*"],
-      HTTPCors: ["*"],
-      WSOrigins: ["*"],
+      HTTPVirtualHosts: ["localhost", "127.0.0.1"],
+      HTTPCors: [],
+      WSOrigins: [],
       Endpoints: ["ledger", "stats", "embedded", "subscribe"]
     },
     Net: {
@@ -186,9 +198,9 @@ function seedNodeConfig() {
       HTTPPort: 35997,
       WSHost: "0.0.0.0",
       WSPort: 35998,
-      HTTPVirtualHosts: ["*"],
-      HTTPCors: ["*"],
-      WSOrigins: ["*"],
+      HTTPVirtualHosts: ["localhost", "127.0.0.1"],
+      HTTPCors: [],
+      WSOrigins: [],
       Endpoints: ["ledger", "stats", "embedded", "subscribe"]
     },
     Net: {
@@ -329,19 +341,19 @@ async function main() {
   overview = (await request("/api/admin/overview", {}, adminCookie)).body;
 
   await rm(OUT_DIR, { recursive: true, force: true });
-  await mkdir(DEVNET_DIR, { recursive: true });
-  await mkdir(OPERATORS_DIR, { recursive: true });
-  await writeFile(path.join(DEVNET_DIR, "genesis.json"), pretty(overview.genesis));
+  await ensurePrivateDir(DEVNET_DIR);
+  await ensurePrivateDir(OPERATORS_DIR);
+  await writePrivateFile(path.join(DEVNET_DIR, "genesis.json"), pretty(overview.genesis));
 
   const configs = { seed: seedNodeConfig() };
   const seedDir = path.join(DEVNET_DIR, seedNode.role);
-  await mkdir(seedDir, { recursive: true });
-  await writeFile(path.join(seedDir, "config.json"), pretty(configs.seed));
-  await writeFile(path.join(seedDir, "network-private-key"), seedNode.nodeKey.privateKey);
+  await ensurePrivateDir(seedDir);
+  await writePrivateFile(path.join(seedDir, "config.json"), pretty(configs.seed));
+  await writePrivateFile(path.join(seedDir, "network-private-key"), seedNode.nodeKey.privateKey);
 
   for (const role of roles) {
     const packageResponse = await request("/api/pillar/package", {}, role.userCookie);
-    await writeFile(path.join(OPERATORS_DIR, `${role.pillarName}-pillar-package.zip`), packageResponse.body);
+    await writePrivateFile(path.join(OPERATORS_DIR, `${role.pillarName}-pillar-package.zip`), packageResponse.body);
 
     const zip = await JSZip.loadAsync(packageResponse.body);
     const packageConfig = JSON.parse(await zip.file("config.json").async("string"));
@@ -350,21 +362,22 @@ async function main() {
     configs[role.role] = config;
 
     const roleDir = path.join(DEVNET_DIR, role.role);
-    await mkdir(path.join(roleDir, "wallet"), { recursive: true });
-    await writeFile(path.join(roleDir, "config.json"), pretty(config));
-    await writeFile(path.join(roleDir, "network-private-key"), role.nodeKey.privateKey);
-    await writeFile(path.join(roleDir, "wallet", "producer.json"), pretty(producerWallet));
+    await ensurePrivateDir(roleDir);
+    await ensurePrivateDir(path.join(roleDir, "wallet"));
+    await writePrivateFile(path.join(roleDir, "config.json"), pretty(config));
+    await writePrivateFile(path.join(roleDir, "network-private-key"), role.nodeKey.privateKey);
+    await writePrivateFile(path.join(roleDir, "wallet", "producer.json"), pretty(producerWallet));
   }
 
   const genesisChecks = validateGenesis(overview.genesis, roles.map((role) => role.pillar));
   const configChecks = validateConfigs(configs);
   const failedChecks = [...genesisChecks, ...configChecks].filter((check) => !check.ok);
 
-  await writeFile(
+  await writePrivateFile(
     path.join(OUT_DIR, "Dockerfile"),
     `FROM go-zenon-devnet:latest\nRUN rm -rf /devnet\nCOPY devnet /devnet\n`
   );
-  await writeFile(
+  await writePrivateFile(
     path.join(OUT_DIR, "docker-compose.yml"),
     `name: zenon-generated-devnet
 
@@ -380,8 +393,8 @@ ${roles
     environment:
       ZNND_ROLE: ${role.role}
     ports:
-      - "${role.httpPort}:35997"
-      - "${role.wsPort}:35998"
+      - "127.0.0.1:${role.httpPort}:35997"
+      - "127.0.0.1:${role.wsPort}:35998"
     volumes:
       - ${role.role}-data:/root/.znn
     networks:
@@ -401,11 +414,11 @@ volumes:
 ${roles.concat(seedNode).map((role) => `  ${role.role}-data:`).join("\n")}
 `
   );
-  await writeFile(
+  await writePrivateFile(
     path.join(OUT_DIR, "operator-logins.txt"),
     roles.map((role) => `${role.username}\t${role.password}\t${BASE_URL}`).join("\n") + "\n"
   );
-  await writeFile(
+  await writePrivateFile(
     path.join(OUT_DIR, "summary.json"),
     pretty({
       builderUrl: BASE_URL,
@@ -433,7 +446,7 @@ ${roles.concat(seedNode).map((role) => `  ${role.role}-data:`).join("\n")}
       }
     })
   );
-  await writeFile(
+  await writePrivateFile(
     path.join(OUT_DIR, "README.md"),
     `# Four Node Zenon Devnet
 

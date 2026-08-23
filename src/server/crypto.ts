@@ -2,11 +2,17 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt as sc
 import { promisify } from "node:util";
 
 const scrypt = promisify(scryptCallback);
-const SECRET = process.env.APP_SECRET ?? "dev-secret-change-me";
+const DEVELOPMENT_SECRET = "dev-secret-change-me";
 
-if (!process.env.APP_SECRET && process.env.NODE_ENV === "production") {
-  console.warn("APP_SECRET is not set; using the development secret. Set APP_SECRET before using this outside local testing.");
+function applicationSecret(): string {
+  const configuredSecret = process.env.APP_SECRET?.trim();
+  if (process.env.NODE_ENV === "production" && (!configuredSecret || configuredSecret === DEVELOPMENT_SECRET)) {
+    throw new Error("APP_SECRET must be set to a non-default value in production.");
+  }
+  return configuredSecret || DEVELOPMENT_SECRET;
 }
+
+const SECRET = applicationSecret();
 
 function keyFromSecret(): Buffer {
   return createHash("sha256").update(SECRET).digest();
