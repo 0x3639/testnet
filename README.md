@@ -27,6 +27,7 @@ The backend is Node/Express. The frontend is React/Vite and follows the dark, co
 ## Planning Docs
 
 - [Genesis release automation plan](docs/genesis-release-automation-plan.md): proposed event history, configurable `go-zenon` release targets, operator-specific bootstrap scripts, and node polling automation.
+- [Loupe security scanning](docs/loupe-security-scanning.md): guarded repository registration, scanner scope, and baseline/incremental scan commands.
 
 ## Important Security Notes
 
