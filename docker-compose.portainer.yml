@@ -8,13 +8,17 @@ services:
       NODE_ENV: production
       TZ: ${TZ:-Etc/UTC}
       PORT: 8787
+      TRUST_PROXY_HOPS: 1
       DATA_DIR: /app/data
       APP_SECRET: ${APP_SECRET:?Set APP_SECRET in the Portainer stack environment}
       COOKIE_SECURE: "true"
+      PUBLIC_BASE_URL: https://${TESTNET_HOST:-testnet.zenon.info}
       GO_ZENON_REPO: ${GO_ZENON_REPO:-https://github.com/zenon-network/go-zenon.git}
       GO_ZENON_REF: ${GO_ZENON_REF:-master}
+      GO_ZENON_COMMIT: ${GO_ZENON_COMMIT:-}
       DEPLOYMENT_REPO: ${DEPLOYMENT_REPO:-https://github.com/hypercore-one/deployment.git}
       DEPLOYMENT_REF: ${DEPLOYMENT_REF:-main}
+      DEPLOYMENT_COMMIT: ${DEPLOYMENT_COMMIT:-}
     volumes:
       - zenon_testnet_builder_data:/app/data
     expose:

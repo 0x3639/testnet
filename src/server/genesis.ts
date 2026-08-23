@@ -12,6 +12,7 @@ import {
   ZNN_ZTS
 } from "./constants.js";
 import { stableHashHex } from "./crypto.js";
+import { isPinnedGitCommit } from "./releases.js";
 import type { AppState, NetworkSettings, PillarRecord, PublicPillar, ReadinessCheck } from "../shared/types.js";
 
 function units(amount: number): number {
@@ -188,7 +189,7 @@ export function buildNodeConfig(
           Address: pillar.producerWallet.address,
           Index: pillar.producerIndex,
           KeyFilePath: paths.producerKeyFilePath ?? `${walletPath}/producer.json`,
-          Password: producerPassword ?? "<producer-password>"
+          ...(producerPassword === undefined ? {} : { Password: producerPassword })
         }
       : undefined,
     RPC: {
@@ -250,6 +251,16 @@ export function readiness(state: AppState): ReadinessCheck[] {
       detail: (state.settings.bootstrapPeers ?? []).length
         ? `${(state.settings.bootstrapPeers ?? []).length} configured`
         : "Required for libp2p after activation"
+    },
+    {
+      label: "go-zenon commit pin",
+      ok: isPinnedGitCommit(state.settings.goZenonCommit),
+      detail: isPinnedGitCommit(state.settings.goZenonCommit) ? state.settings.goZenonCommit : "Full commit required before publish"
+    },
+    {
+      label: "Deployment commit pin",
+      ok: isPinnedGitCommit(state.settings.deploymentCommit),
+      detail: isPinnedGitCommit(state.settings.deploymentCommit) ? state.settings.deploymentCommit : "Full commit required before publish"
     }
   ];
 }

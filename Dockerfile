@@ -2,7 +2,7 @@ FROM node:20-bookworm-slim AS build
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY . .
 RUN npm run build
@@ -15,11 +15,12 @@ ENV NODE_ENV=production
 ENV PORT=8787
 ENV DATA_DIR=/app/data
 
-COPY --from=build /app/package.json ./package.json
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
+COPY --from=build --chown=node:node /app/package.json ./package.json
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
 
-RUN mkdir -p /app/data
+RUN install -d -o node -g node -m 700 /app/data
 
 EXPOSE 8787
+USER node
 CMD ["node", "dist/server/server/index.js"]

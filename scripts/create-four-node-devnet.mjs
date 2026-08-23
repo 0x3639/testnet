@@ -330,6 +330,13 @@ async function main() {
         expectedPillars: 4,
         minPillars: 3,
         genesisTimestampSec: Math.floor(Date.now() / 1000),
+        goZenonRepo: overview.settings.goZenonRepo,
+        goZenonRef: overview.settings.goZenonRef,
+        goZenonCommit: overview.settings.goZenonCommit,
+        deploymentRepo: overview.settings.deploymentRepo,
+        deploymentRef: overview.settings.deploymentRef,
+        deploymentCommit: overview.settings.deploymentCommit,
+        wipeDataOnPublish: false,
         seeders: [seedNode.enode],
         bootstrapPeers: [seedNode.multiaddr],
         sporks: overview.settings.sporks

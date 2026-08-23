@@ -31,6 +31,12 @@ export interface PillarRecord {
   producerIndex: number;
   statusTokenHash?: string;
   statusTokenCipher?: string;
+  enrollmentTokenHash?: string;
+  enrollmentTokenCipher?: string;
+  enrollmentTokenExpiresAt?: string;
+  enrollmentTokenUsedAt?: string;
+  secretDownloadTokenHash?: string;
+  secretDownloadTokenExpiresAt?: string;
   nodeStatus?: PillarNodeStatus;
   packageDownloadedAt?: string;
   createdAt: string;
@@ -48,6 +54,12 @@ export interface SeedNodeRecord {
   networkPrivateKeyCipher: string;
   statusTokenHash?: string;
   statusTokenCipher?: string;
+  enrollmentTokenHash?: string;
+  enrollmentTokenCipher?: string;
+  enrollmentTokenExpiresAt?: string;
+  enrollmentTokenUsedAt?: string;
+  secretDownloadTokenHash?: string;
+  secretDownloadTokenExpiresAt?: string;
   nodeStatus?: PillarNodeStatus;
   packageDownloadedAt?: string;
   createdAt: string;
@@ -72,6 +84,7 @@ export interface NetworkSettings {
   goZenonCommit?: string;
   deploymentRepo: string;
   deploymentRef: string;
+  deploymentCommit?: string;
   releaseApplyAtSec?: number;
   wipeDataOnPublish: boolean;
   sporkAddress: string;
@@ -155,6 +168,7 @@ export interface ReleaseTarget {
   deployment: {
     repoUrl: string;
     ref: string;
+    commit?: string;
   };
 }
 
@@ -270,7 +284,10 @@ export interface UserOverview {
   pillar?: PublicPillar;
   seedNode?: PublicSeedNode;
   bootstrap?: {
-    statusToken: string;
+    enrollment?: {
+      token: string;
+      expiresAt: string;
+    };
   };
 }
 

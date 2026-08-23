@@ -76,11 +76,14 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function bootstrapCommand(token: string): string {
+function bootstrapCommand(): string {
   const baseUrl = publicUrl("/").replace(/\/$/, "");
-  return `curl -fsSL ${shellQuote(publicUrl("/api/bootstrap/install.sh"))} | sudo env ZNN_BOOTSTRAP_TOKEN=${shellQuote(
-    token
-  )} ZNN_TESTNET_URL=${shellQuote(baseUrl)} bash`;
+  const tokenFile = "/run/znn-testnet-enrollment-token";
+  return `read -rsp 'Enrollment token: ' ZNN_ENROLLMENT_TOKEN && printf '\\n' && printf '%s' "$ZNN_ENROLLMENT_TOKEN" | sudo install -m 600 /dev/stdin ${shellQuote(
+    tokenFile
+  )} && unset ZNN_ENROLLMENT_TOKEN && curl -fsSL ${shellQuote(
+    publicUrl("/api/bootstrap/install.sh")
+  )} | sudo env ZNN_ENROLLMENT_TOKEN_FILE=${shellQuote(tokenFile)} ZNN_TESTNET_URL=${shellQuote(baseUrl)} bash`;
 }
 
 function toUtcDateTimeInput(seconds?: number): string {
@@ -115,6 +118,7 @@ function settingsKey(settings: PublicNetworkSettings): string {
     goZenonCommit: settings.goZenonCommit || "",
     deploymentRepo: settings.deploymentRepo,
     deploymentRef: settings.deploymentRef,
+    deploymentCommit: settings.deploymentCommit || "",
     wipeDataOnPublish: settings.wipeDataOnPublish,
     seeders: settings.seeders.filter(Boolean),
     bootstrapPeers: settings.bootstrapPeers.filter(Boolean),
@@ -268,7 +272,9 @@ function OperatorView({ session, refresh }: { session: UserOverview; refresh: ()
   const [registerSeedNode, setRegisterSeedNode] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const command = session.bootstrap?.statusToken ? bootstrapCommand(session.bootstrap.statusToken) : "";
+  const [rotatingEnrollment, setRotatingEnrollment] = useState(false);
+  const enrollment = session.bootstrap?.enrollment;
+  const command = enrollment ? bootstrapCommand() : "";
   const hasNode = Boolean(session.pillar || session.seedNode);
   const displayName = session.pillar?.pillarName ?? session.seedNode?.nodeName ?? "Register Node";
 
@@ -297,6 +303,19 @@ function OperatorView({ session, refresh }: { session: UserOverview; refresh: ()
     }
   }
 
+  async function rotateEnrollment() {
+    setError("");
+    setRotatingEnrollment(true);
+    try {
+      await api("/api/bootstrap/enrollment-token", { method: "POST" });
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRotatingEnrollment(false);
+    }
+  }
+
   return (
     <div className="pageGrid">
       <section>
@@ -316,13 +335,22 @@ function OperatorView({ session, refresh }: { session: UserOverview; refresh: ()
               <Button icon={<Download size={18} />} onClick={() => download("/api/pillar/package")}>
                 Download Package
               </Button>
-              {command ? (
-                <Button variant="secondary" icon={<Copy size={18} />} onClick={() => copy(command)}>
-                  Copy Bootstrap
+              {enrollment ? (
+                <>
+                  <Button variant="secondary" icon={<KeyRound size={18} />} onClick={() => copy(enrollment.token)}>
+                    Copy Enrollment Token
+                  </Button>
+                  <Button variant="secondary" icon={<Copy size={18} />} onClick={() => copy(command)}>
+                    Copy Bootstrap
+                  </Button>
+                </>
+              ) : (
+                <Button variant="secondary" icon={<KeyRound size={18} />} onClick={rotateEnrollment} disabled={rotatingEnrollment}>
+                  {rotatingEnrollment ? "Rotating" : "Create Enrollment Token"}
                 </Button>
-              ) : null}
+              )}
             </div>
-            {command ? (
+            {enrollment ? (
               <div className="bootstrapBlock">
                 <div className="panelHeader">
                   <div>
@@ -331,6 +359,8 @@ function OperatorView({ session, refresh }: { session: UserOverview; refresh: ()
                   </div>
                   <Terminal size={20} />
                 </div>
+                <span className="ledger">Enrollment token · expires {formatUtc(enrollment.expiresAt)}</span>
+                <pre className="commandBlock">{enrollment.token}</pre>
                 <pre className="commandBlock">{command}</pre>
               </div>
             ) : null}
@@ -348,13 +378,22 @@ function OperatorView({ session, refresh }: { session: UserOverview; refresh: ()
               <Button icon={<Download size={18} />} onClick={() => download("/api/pillar/package")}>
                 Download Package
               </Button>
-              {command ? (
-                <Button variant="secondary" icon={<Copy size={18} />} onClick={() => copy(command)}>
-                  Copy Bootstrap
+              {enrollment ? (
+                <>
+                  <Button variant="secondary" icon={<KeyRound size={18} />} onClick={() => copy(enrollment.token)}>
+                    Copy Enrollment Token
+                  </Button>
+                  <Button variant="secondary" icon={<Copy size={18} />} onClick={() => copy(command)}>
+                    Copy Bootstrap
+                  </Button>
+                </>
+              ) : (
+                <Button variant="secondary" icon={<KeyRound size={18} />} onClick={rotateEnrollment} disabled={rotatingEnrollment}>
+                  {rotatingEnrollment ? "Rotating" : "Create Enrollment Token"}
                 </Button>
-              ) : null}
+              )}
             </div>
-            {command ? (
+            {enrollment ? (
               <div className="bootstrapBlock">
                 <div className="panelHeader">
                   <div>
@@ -363,6 +402,8 @@ function OperatorView({ session, refresh }: { session: UserOverview; refresh: ()
                   </div>
                   <Terminal size={20} />
                 </div>
+                <span className="ledger">Enrollment token · expires {formatUtc(enrollment.expiresAt)}</span>
+                <pre className="commandBlock">{enrollment.token}</pre>
                 <pre className="commandBlock">{command}</pre>
               </div>
             ) : null}
@@ -1046,7 +1087,16 @@ function SettingsForm({
               className="mono"
               value={draft.goZenonCommit ?? ""}
               onChange={(event) => setDraft({ ...draft, goZenonCommit: event.target.value })}
-              placeholder="optional"
+              placeholder="required full commit"
+            />
+          </label>
+          <label>
+            <span>Deployment Commit Pin</span>
+            <input
+              className="mono"
+              value={draft.deploymentCommit ?? ""}
+              onChange={(event) => setDraft({ ...draft, deploymentCommit: event.target.value })}
+              placeholder="required full commit"
             />
           </label>
           <label>
@@ -1365,6 +1415,7 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
         goZenonCommit: settings.goZenonCommit,
         deploymentRepo: settings.deploymentRepo,
         deploymentRef: settings.deploymentRef,
+        deploymentCommit: settings.deploymentCommit,
         wipeDataOnPublish: settings.wipeDataOnPublish,
         seeders: settings.seeders,
         bootstrapPeers: settings.bootstrapPeers,

@@ -6,8 +6,11 @@ const DEVELOPMENT_SECRET = "dev-secret-change-me";
 
 function applicationSecret(): string {
   const configuredSecret = process.env.APP_SECRET?.trim();
-  if (process.env.NODE_ENV === "production" && (!configuredSecret || configuredSecret === DEVELOPMENT_SECRET)) {
-    throw new Error("APP_SECRET must be set to a non-default value in production.");
+  if (
+    process.env.NODE_ENV === "production" &&
+    (!configuredSecret || configuredSecret === DEVELOPMENT_SECRET || configuredSecret.length < 32)
+  ) {
+    throw new Error("APP_SECRET must be set to a non-default value in production and contain at least 32 characters.");
   }
   return configuredSecret || DEVELOPMENT_SECRET;
 }

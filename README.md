@@ -31,7 +31,7 @@ The backend is Node/Express. The frontend is React/Vite and follows the dark, co
 
 ## Important Security Notes
 
-Set `APP_SECRET` before using the app outside local testing. It is used as the server-side encryption key for sensitive stored wallet package secrets, especially wallet passwords.
+Set `APP_SECRET` before using the app outside local testing. It is used as the server-side encryption key for sensitive stored wallet package secrets, especially wallet passwords. Production startup fails when this value is missing, shorter than 32 characters, or still uses the known development default.
 
 Do not change `APP_SECRET` after operators register pillars. Existing encrypted wallet package secrets will no longer decrypt correctly if the secret changes.
 
@@ -45,6 +45,10 @@ Treat these as secret material:
 - generated devnet `network-private-key` files
 
 The generated `data/`, `dist/`, `node_modules/`, and `devnet/four-node/` directories are intentionally ignored by git.
+
+The application container runs as the bundled non-root `node` user, and its named data volume is initialized for that user. Custom bind mounts must grant that user write access without making the state directory broadly readable. Authentication endpoints also apply bounded per-account and per-source delays and temporary lockouts; retain a proxy-level rate limit as an additional deployment control.
+
+Browser responses include a restrictive security-header baseline and use only local system fonts. HSTS is emitted when `COOKIE_SECURE=true`, which must only be enabled behind confirmed HTTPS termination. Secret-bearing downloads explicitly disable intermediary and browser caching.
 
 ## Requirements
 
@@ -82,15 +86,19 @@ The node bootstrap script reads its active install target from the admin setting
 ```text
 GO_ZENON_REPO=https://github.com/zenon-network/go-zenon.git
 GO_ZENON_REF=master
+GO_ZENON_COMMIT=<full-commit-id>
 DEPLOYMENT_REPO=https://github.com/hypercore-one/deployment.git
 DEPLOYMENT_REF=main
+DEPLOYMENT_COMMIT=<full-commit-id>
 ```
 
-After the app is running, admins can edit the go-zenon repo/ref, optional commit label, deployment repo, deployment ref, one-shot data wipe flag, and optional release apply time from the Settings panel. Saving these values only updates the draft settings. They do not reach `/node-plan.json` or authenticated bootstrap manifests until an admin clicks **Publish Release**. Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`.
+After the app is running, admins can edit the go-zenon and deployment repositories, refs, immutable commit pins, one-shot data wipe flag, and optional release apply time from the Settings panel. Saving these values only updates the draft settings. They do not reach `/node-plan.json` or authenticated bootstrap manifests until an admin clicks **Publish Release**.
+
+Both full commit pins are required before publishing. Each ref is fetched and must resolve to its configured commit exactly; a mismatch aborts before deployment code is executed. This prevents a moved branch or tag from silently changing privileged installation inputs.
 
 ## Standalone Docker
 
-Use `docker-compose.yml` when you want the repo to run its own Caddy container. This is the easiest local or single-host setup.
+Use `docker-compose.yml` when you want the repo to run its own Caddy container for local access. The bundled HTTP endpoint is bound to host loopback and must not be exposed directly to another network.
 
 ```bash
 APP_SECRET="$(openssl rand -hex 32)" docker compose up -d --build
@@ -111,8 +119,12 @@ http://localhost:8080
 The standalone stack contains:
 
 - `app`: the Node/React application on internal port `8787`.
-- `caddy`: a bundled reverse proxy exposed on `${HTTP_PORT:-8080}`.
+- `caddy`: a bundled reverse proxy exposed only on `127.0.0.1:${HTTP_PORT:-8080}`.
 - `testnet-data`: persistent app state mounted at `/app/data`.
+
+For remote access, use the Portainer profile behind its HTTPS proxy or an equivalent deployment that terminates TLS and sets secure cookies. Do not change the standalone binding to `0.0.0.0`; the bundled Caddy profile serves cleartext HTTP.
+
+The supplied Compose profiles set a canonical `PUBLIC_BASE_URL` and one trusted reverse-proxy hop. Custom production deployments must also set `PUBLIC_BASE_URL` to the exact external HTTPS origin and set `TRUST_PROXY_HOPS` to the exact number of trusted proxy hops. Request `Host` and forwarded-host headers are not used to construct privileged bootstrap URLs when the canonical origin is present.
 
 ## Portainer With Existing Caddy
 
@@ -170,11 +182,15 @@ Set these stack environment variables:
 
 - `APP_SECRET`: a stable secret, for example the output of `openssl rand -hex 32`.
 - `TESTNET_HOST`: the public host Caddy should route, for example `testnet.zenon.info`.
+- `PUBLIC_BASE_URL`: derived by the supplied stack as `https://<TESTNET_HOST>`; set it explicitly for custom deployments.
+- `TRUST_PROXY_HOPS`: set to `1` by the supplied proxy topology; custom deployments must match their exact trusted proxy chain.
 - `TZ`: optional, defaults to `Etc/UTC`.
 - `GO_ZENON_REPO`: optional initial default, defaults to `https://github.com/zenon-network/go-zenon.git`.
 - `GO_ZENON_REF`: optional initial default, defaults to `master`.
+- `GO_ZENON_COMMIT`: optional initial full commit pin; required before publishing.
 - `DEPLOYMENT_REPO`: optional initial default, defaults to `https://github.com/hypercore-one/deployment.git`.
 - `DEPLOYMENT_REF`: optional initial default, defaults to `main`.
+- `DEPLOYMENT_COMMIT`: optional initial full commit pin; required before publishing.
 
 Example values:
 
@@ -298,14 +314,18 @@ Seed-node packages do not include pillar, reward, or producer wallets. The seed 
 
 ## Operator Bootstrap
 
-After registering a pillar or seed node, the operator page shows a copyable command shaped like this:
+After registering a pillar or seed node, the operator page shows a one-time enrollment token and a copyable command shaped like this:
 
 ```bash
-curl -fsSL "https://<TESTNET_HOST>/api/bootstrap/install.sh" | sudo env ZNN_BOOTSTRAP_TOKEN="<node-token>" ZNN_TESTNET_URL="https://<TESTNET_HOST>" bash
+read -rsp 'Enrollment token: ' ZNN_ENROLLMENT_TOKEN && printf '\n' && \
+printf '%s' "$ZNN_ENROLLMENT_TOKEN" | sudo install -m 600 /dev/stdin /run/znn-testnet-enrollment-token && \
+unset ZNN_ENROLLMENT_TOKEN && \
+curl -fsSL "https://<TESTNET_HOST>/api/bootstrap/install.sh" | sudo env ZNN_ENROLLMENT_TOKEN_FILE=/run/znn-testnet-enrollment-token ZNN_TESTNET_URL="https://<TESTNET_HOST>" bash
 ```
 
 Run it on the node host. The script is intended for the same Linux/systemd style environment supported by `hypercore-one/deployment`.
-In **Node Deployment**, the go-zenon repo and branch/tag choose the node source code that gets built. The deployment script repo and branch/tag choose the installer scripts that clone, build, install, and manage the service. The optional go-zenon commit pin is only needed when a release must be tied to an exact commit instead of the branch tip.
+Paste the enrollment token only at the hidden prompt. It is written through standard input to a root-owned mode-`0600` file and is not embedded in shell history, environment values, cron content, or command arguments.
+In **Node Deployment**, the go-zenon and deployment refs select the source revisions to fetch. Both refs must resolve exactly to their required full commit pins. The agent aborts before executing deployment code when either commit does not match.
 For testnet operators, the bootstrap agent relaxes the deployment script CPU pre-flight minimum from 4 cores to 2 cores by default. Override it by adding `ZNN_DEPLOYMENT_MIN_CPU_CORES="<cores>"` to the bootstrap command if a stricter minimum is needed.
 The agent also changes the deployment script's total RAM check from a hard failure to a warning. A 4 GB VPS can report as `3GiB` after integer rounding, so the script will log the RAM finding and keep going. 4 GiB remains the recommended minimum for builds.
 The initial bootstrap run and the one-minute cron job share `/var/lock/znn-testnet-agent.lock`, so a long go-zenon build cannot be started twice. If `zenon.sh` reports `Failed to build binary`, check `/opt/zenon-deployment/.znnsh.log` for the underlying Go compiler error.
@@ -321,25 +341,26 @@ The bootstrap flow before a release is published:
 
 After **Publish Release**, the agent waits until `actions.applyAt` if that timestamp is present and in the future. When the apply time has arrived, the agent:
 
-1. Downloads the authenticated bootstrap manifest with the node token.
-2. Clones `DEPLOYMENT_REPO` at `DEPLOYMENT_REF`.
-3. Patches the deployment pre-flight CPU minimum to `ZNN_DEPLOYMENT_MIN_CPU_CORES`, default `2`, and changes the total RAM check to warning-only.
-4. Runs `./zenon.sh --deploy zenon "$GO_ZENON_REPO" "$GO_ZENON_REF"` to build and install go-zenon.
-5. Stops `go-zenon`.
-6. Wipes node data if the published node plan has `actions.wipeData: true`.
-7. Writes `/root/.znn/genesis.json`.
-8. Writes the node-specific `/root/.znn/config.json`.
-9. For pillars, writes `/root/.znn/wallet/producer.json` and `/root/.znn/wallet/producer-password.txt`.
-10. For managed seed nodes, writes `/root/.znn/network-private-key`.
-11. Restarts `go-zenon` and sends a status report.
+1. Reads the authenticated manifest with the enrollment token.
+2. At the release apply time, exchanges enrollment once for a node-status token and a 30-minute secret-download token.
+3. Downloads missing producer or network secrets immediately with the short-lived token.
+4. Fetches `DEPLOYMENT_REF` and verifies that it resolves exactly to `DEPLOYMENT_COMMIT`.
+5. Fetches `GO_ZENON_REF`, verifies `GO_ZENON_COMMIT`, and exposes only that verified local source to the pinned deployment script.
+6. Patches the deployment pre-flight CPU minimum to `ZNN_DEPLOYMENT_MIN_CPU_CORES`, default `2`, and changes the total RAM check to warning-only.
+7. Builds and installs go-zenon from the verified local revision.
+8. Stops `go-zenon`.
+9. Wipes node data if the published node plan has `actions.wipeData: true`.
+10. Writes `/root/.znn/genesis.json` and the node-specific `/root/.znn/config.json`.
+11. Restores the local producer password into pillar config without sending it through the long-lived status credential.
+12. Restarts `go-zenon`, revokes the short-lived server capability, deletes the local secret-download token, and sends a status report.
 
 The wipe action is controlled by **Wipe node data on next Publish Release** in admin Settings. It is one-shot: publishing a release snapshots the flag into `/node-plan.json`, then clears the draft checkbox. **Apply Release At (UTC)** is also one-shot: publishing snapshots it into `/node-plan.json`, then clears the draft field. The agent preserves `/root/.znn/wallet`, `/root/.znn/genesis.json`, `/root/.znn/config.json`, and `/root/.znn/network-private-key`, and removes other files/directories under `/root/.znn` before writing the published artifacts.
 
-The token in the bootstrap command also authorizes node-specific downloads and node status reporting. Treat it like an operator secret.
+Enrollment tokens expire after seven days and can be used once. Rotating enrollment credentials invalidates the previous node-status credential. The issued status token can read manifests and non-secret node configuration and submit status, but it cannot download producer key files, producer passwords, or seed-node network private keys.
 
 ## Node Status Reporting
 
-Each registered pillar or managed seed node receives a private node status token in its operator package and bootstrap command. The installed agent uses that token to report health back to the orchestrator without exposing the app username or password.
+Each registered pillar or managed seed node receives a private node status token in its operator package. The bootstrap agent receives the current status token only through the one-time enrollment exchange and stores it in a root-owned credential file. It uses that token to report health without exposing the app username or password.
 
 Heartbeat reports are sent with a bearer token:
 
@@ -413,7 +434,7 @@ For managed seed nodes, create an operator user, then use the admin **Seed Nodes
 
 This managed flow does not query the seed node RPC and does not require the seed node to be running before genesis/config are published. The enode and libp2p multiaddr are deterministic from the generated network private key plus public IP/port.
 
-For an external already-running seed node, use the **External Seeder / RPC Probe** panel before publishing the config. The app calls the seed node RPC on port `35997` by default, reads `stats.networkInfo.self.publicKey`, and saves both an `enode://<public-key>@<ip>:35995` entry into `Net.Seeders` and a `/ip4/<ip>/tcp/35995/p2p/<peer-id>` entry into `Net.BootstrapPeers`.
+For an external already-running seed node, use the **External Seeder / RPC Probe** panel before publishing the config. The app calls the seed node RPC on port `35997` by default, reads `stats.networkInfo.self.publicKey`, and saves both an `enode://<public-key>@<ip>:35995` entry into `Net.Seeders` and a `/ip4/<ip>/tcp/35995/p2p/<peer-id>` entry into `Net.BootstrapPeers`. The probe accepts publicly routable literal IP addresses only, rejects local and special-use ranges, and does not follow redirects.
 
 Use the node's public IP address. If RPC or p2p is exposed on non-default ports, adjust the ports in the external seeder probe form before probing.
 
@@ -508,6 +529,9 @@ Node heartbeat reporting:
 Operator bootstrap:
 
 - `GET /api/bootstrap/install.sh`
+- `POST /api/bootstrap/enroll`
+- `POST /api/bootstrap/complete`
+- `POST /api/bootstrap/enrollment-token`
 - `GET /api/bootstrap/manifest`
 - `GET /api/bootstrap/node-config.json`
 - `GET /api/bootstrap/pillar-config.json`

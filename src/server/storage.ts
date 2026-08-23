@@ -14,6 +14,7 @@ const DEFAULT_GO_ZENON_REF = process.env.GO_ZENON_REF ?? "master";
 const DEFAULT_GO_ZENON_COMMIT = process.env.GO_ZENON_COMMIT;
 const DEFAULT_DEPLOYMENT_REPO = process.env.DEPLOYMENT_REPO ?? "https://github.com/hypercore-one/deployment.git";
 const DEFAULT_DEPLOYMENT_REF = process.env.DEPLOYMENT_REF ?? "main";
+const DEFAULT_DEPLOYMENT_COMMIT = process.env.DEPLOYMENT_COMMIT;
 let stateUpdateQueue = Promise.resolve();
 
 function defaultSettings(): NetworkSettings {
@@ -28,6 +29,7 @@ function defaultSettings(): NetworkSettings {
     goZenonCommit: DEFAULT_GO_ZENON_COMMIT,
     deploymentRepo: DEFAULT_DEPLOYMENT_REPO,
     deploymentRef: DEFAULT_DEPLOYMENT_REF,
+    deploymentCommit: DEFAULT_DEPLOYMENT_COMMIT,
     releaseApplyAtSec: undefined,
     wipeDataOnPublish: false,
     sporkAddress: "",

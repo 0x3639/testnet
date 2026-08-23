@@ -1,4 +1,4 @@
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
 import { enodeFromPublicKey, multiaddrFromPublicKey, normalizePublicKey } from "./libp2p.js";
 import type { SeedNodeProbeResult } from "../shared/types.js";
 
@@ -14,6 +14,33 @@ interface JsonRpcResponse {
     message?: string;
   };
   result?: unknown;
+}
+
+const blockedProbeTargets = new BlockList();
+for (const [address, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["224.0.0.0", 4],
+  ["240.0.0.0", 4]
+] as Array<[string, number]>) {
+  blockedProbeTargets.addSubnet(address, prefix, "ipv4");
+}
+for (const [address, prefix] of [
+  ["::", 128],
+  ["::1", 128],
+  ["fc00::", 7],
+  ["fe80::", 10],
+  ["ff00::", 8],
+  ["2001:db8::", 32]
+] as Array<[string, number]>) {
+  blockedProbeTargets.addSubnet(address, prefix, "ipv6");
 }
 
 function hostForUrl(ip: string): string {
@@ -46,10 +73,17 @@ export function validateSeedNodeIp(ip: string): boolean {
   return isIP(ip.trim()) !== 0;
 }
 
+export function validateSeedProbeIp(ip: string): boolean {
+  const normalized = ip.trim();
+  const family = isIP(normalized);
+  if (family === 0) return false;
+  return !blockedProbeTargets.check(normalized, family === 4 ? "ipv4" : "ipv6");
+}
+
 export async function probeSeedNode(input: SeedNodeProbeInput): Promise<SeedNodeProbeResult> {
   const ip = input.ip.trim();
-  if (!validateSeedNodeIp(ip)) {
-    throw new Error("Seed node must be an IP address");
+  if (!validateSeedProbeIp(ip)) {
+    throw new Error("Seed probe target must be a publicly routable IP address");
   }
 
   const rpcUrl = `http://${hostForUrl(ip)}:${input.rpcPort}`;
@@ -64,6 +98,7 @@ export async function probeSeedNode(input: SeedNodeProbeInput): Promise<SeedNode
       method: "stats.networkInfo",
       params: []
     }),
+    redirect: "error",
     signal: AbortSignal.timeout(8000)
   });
 
