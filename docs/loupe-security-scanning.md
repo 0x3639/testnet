@@ -6,6 +6,12 @@ and the operational files that automatic package-root discovery would not
 normally include, especially the devnet wallet-generation script, container
 definitions, Caddy configuration, and Vite configuration.
 
+The profile relies on per-repository scanner configuration, including
+`extra_source_paths`. Use the compatible Loupe fork at
+`https://github.com/edgepillar/loupe.git`, pinned to commit
+`5c8744c1b2823415fe851d17bae92ff8f7193a15`. Do not silently substitute a
+Loupe revision that does not implement these scanner fields.
+
 ## Register the repository
 
 Run these commands from a checkout of this repository after the Loupe server,

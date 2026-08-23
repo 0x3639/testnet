@@ -214,6 +214,8 @@ test("seed probing rejects local network targets and disables redirects", async 
   assert.equal(validateSeedProbeIp("169.254.169.254"), false);
   assert.equal(validateSeedProbeIp("::1"), false);
   assert.equal(validateSeedProbeIp("fe80::1"), false);
+  assert.equal(validateSeedProbeIp("64:ff9b::7f00:1"), false);
+  assert.equal(validateSeedProbeIp("64:ff9b:1::7f00:1"), false);
   assert.match(source, /redirect: "error"/);
 });
 
@@ -312,6 +314,81 @@ test("bootstrap credentials stay out of command arguments and persistent cron va
   assert.match(script, /secret_get "\$producer_url"/);
   assert.match(script, /secret_get "\$network_private_key_url"/);
   assert.equal((server.match(/withSecretDownloadNode\(request, response/g) ?? []).length, 3);
+});
+
+test("bootstrap enrollment publishes token files only after both values validate", async () => {
+  process.env.APP_SECRET = SYNTHETIC_SECRET;
+  const { bootstrapInstallScript } = await import("../dist/server/server/index.js");
+  const script = bootstrapInstallScript("https://testnet.invalid");
+  const functionMatch = script.match(/enroll_node\(\) \{[\s\S]*?\n\}\n\ncomplete_enrollment\(\)/);
+  assert.ok(functionMatch);
+
+  const credentialDir = await mkdtemp(join(tmpdir(), "testnet-bootstrap-credentials-"));
+  const harness = `
+set -euo pipefail
+${functionMatch[0].replace(/\n\ncomplete_enrollment\(\)$/, "")}
+
+CREDENTIAL_DIR="$1"
+BASE_URL="https://testnet.invalid"
+ENROLLMENT_TOKEN_FILE="$CREDENTIAL_DIR/enrollment-token"
+STATUS_TOKEN_FILE="$CREDENTIAL_DIR/status-token"
+SECRET_TOKEN_FILE="$CREDENTIAL_DIR/secret-token"
+
+curl_with_token() {
+  local output_file=""
+  while (( "$#" )); do
+    if [[ "$1" == "-o" ]]; then
+      output_file="$2"
+      shift 2
+    else
+      shift
+    fi
+  done
+  printf '%s\\n' '{"statusToken":"new-status","secretToken":"new-secret"}' > "$output_file"
+}
+
+jq() {
+  if [[ "$*" == *".statusToken"* ]]; then
+    printf '%s\\n' "new-status"
+    return 0
+  fi
+  if [[ "\${FAIL_SECRET:-0}" == "1" ]]; then
+    return 1
+  fi
+  printf '%s\\n' "new-secret"
+}
+
+printf '%s\\n' "enrollment" > "$ENROLLMENT_TOKEN_FILE"
+printf '%s\\n' "old-status" > "$STATUS_TOKEN_FILE"
+printf '%s\\n' "old-secret" > "$SECRET_TOKEN_FILE"
+
+FAIL_SECRET=1
+if enroll_node; then
+  exit 20
+fi
+[[ "$(<"$STATUS_TOKEN_FILE")" == "old-status" ]]
+[[ "$(<"$SECRET_TOKEN_FILE")" == "old-secret" ]]
+[[ -s "$ENROLLMENT_TOKEN_FILE" ]]
+
+FAIL_SECRET=0
+enroll_node
+[[ "$(<"$STATUS_TOKEN_FILE")" == "new-status" ]]
+[[ "$(<"$SECRET_TOKEN_FILE")" == "new-secret" ]]
+[[ ! -e "$ENROLLMENT_TOKEN_FILE" ]]
+if find "$CREDENTIAL_DIR" -maxdepth 1 -name '.*-token.*' -print -quit | grep -q .; then
+  exit 21
+fi
+`;
+
+  try {
+    const outcome = spawnSync("bash", ["-c", harness, "bootstrap-test", credentialDir], {
+      cwd: process.cwd(),
+      encoding: "utf8"
+    });
+    assert.equal(outcome.status, 0, outcome.stderr);
+  } finally {
+    await rm(credentialDir, { recursive: true, force: true });
+  }
 });
 
 test("node config omits producer passwords unless explicitly packaging them", async () => {
@@ -413,6 +490,7 @@ test("HTTP enrollment exchange scopes and revokes secret downloads", async () =>
     assert.equal(registration.status, 201);
 
     const overviewResponse = await fetch(`${baseUrl}/api/me`, { headers: { Cookie: cookie } });
+    assert.equal(overviewResponse.headers.get("cache-control"), "no-store");
     const overview = await overviewResponse.json();
     const enrollmentToken = overview.bootstrap?.enrollment?.token;
     assert.ok(enrollmentToken);

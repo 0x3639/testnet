@@ -790,7 +790,8 @@ chmod 700 "$STATE_DIR"
 mkdir -p "$CREDENTIAL_DIR"
 chmod 700 "$CREDENTIAL_DIR"
 
-if [[ ! -r "$STATUS_TOKEN_FILE" && ! -r "$ENROLLMENT_TOKEN_FILE" ]]; then
+if [[ ! -r "$STATUS_TOKEN_FILE" || ! -s "$STATUS_TOKEN_FILE" ]] &&
+   [[ ! -r "$ENROLLMENT_TOKEN_FILE" || ! -s "$ENROLLMENT_TOKEN_FILE" ]]; then
   echo "No node credential is available. Create a new enrollment token and rerun bootstrap." >&2
   exit 1
 fi
@@ -800,9 +801,9 @@ if ! [[ "$DEPLOYMENT_MIN_CPU_CORES" =~ ^[0-9]+$ ]] || (( DEPLOYMENT_MIN_CPU_CORE
 fi
 
 current_access_token_file() {
-  if [[ -r "$STATUS_TOKEN_FILE" ]]; then
+  if [[ -r "$STATUS_TOKEN_FILE" && -s "$STATUS_TOKEN_FILE" ]]; then
     printf '%s\\n' "$STATUS_TOKEN_FILE"
-  elif [[ -r "$ENROLLMENT_TOKEN_FILE" ]]; then
+  elif [[ -r "$ENROLLMENT_TOKEN_FILE" && -s "$ENROLLMENT_TOKEN_FILE" ]]; then
     printf '%s\\n' "$ENROLLMENT_TOKEN_FILE"
   else
     return 1
@@ -812,7 +813,7 @@ current_access_token_file() {
 curl_with_token() {
   local token_file="$1" curl_config status=0
   shift
-  [[ -r "$token_file" ]] || return 1
+  [[ -r "$token_file" && -s "$token_file" ]] || return 1
   curl_config="$(mktemp)"
   chmod 600 "$curl_config"
   printf 'header = "Authorization: Bearer %s"\\n' "$(tr -d '\\r\\n' < "$token_file")" > "$curl_config"
@@ -828,7 +829,7 @@ auth_get() {
 }
 
 secret_get() {
-  if [[ ! -r "$SECRET_TOKEN_FILE" ]]; then
+  if [[ ! -r "$SECRET_TOKEN_FILE" || ! -s "$SECRET_TOKEN_FILE" ]]; then
     echo "A short-lived secret-download token is required. Create a new enrollment token and rerun bootstrap." >&2
     return 1
   fi
@@ -850,19 +851,39 @@ try_auth_get() {
 }
 
 enroll_node() {
-  local response_file
-  [[ -r "$ENROLLMENT_TOKEN_FILE" ]] || return 0
-  response_file="$(mktemp)"
-  chmod 600 "$response_file"
-  curl_with_token "$ENROLLMENT_TOKEN_FILE" -fsS -X POST -o "$response_file" "$BASE_URL/api/bootstrap/enroll"
-  jq -er '.statusToken' "$response_file" > "$STATUS_TOKEN_FILE"
-  jq -er '.secretToken' "$response_file" > "$SECRET_TOKEN_FILE"
-  chmod 600 "$STATUS_TOKEN_FILE" "$SECRET_TOKEN_FILE"
+  local response_file="" status_token_tmp="" secret_token_tmp=""
+  [[ -r "$ENROLLMENT_TOKEN_FILE" && -s "$ENROLLMENT_TOKEN_FILE" ]] || return 0
+  if ! response_file="$(mktemp)"; then
+    return 1
+  fi
+  if ! status_token_tmp="$(mktemp "$CREDENTIAL_DIR/.status-token.XXXXXX")"; then
+    rm -f "$response_file"
+    return 1
+  fi
+  if ! secret_token_tmp="$(mktemp "$CREDENTIAL_DIR/.secret-token.XXXXXX")"; then
+    rm -f "$response_file" "$status_token_tmp"
+    return 1
+  fi
+  if ! chmod 600 "$response_file" "$status_token_tmp" "$secret_token_tmp" ||
+     ! curl_with_token "$ENROLLMENT_TOKEN_FILE" -fsS -X POST -o "$response_file" "$BASE_URL/api/bootstrap/enroll" ||
+     ! jq -er '.statusToken | select(type == "string" and length > 0)' "$response_file" > "$status_token_tmp" ||
+     ! jq -er '.secretToken | select(type == "string" and length > 0)' "$response_file" > "$secret_token_tmp"; then
+    rm -f "$response_file" "$status_token_tmp" "$secret_token_tmp"
+    return 1
+  fi
+  if ! mv -f "$status_token_tmp" "$STATUS_TOKEN_FILE"; then
+    rm -f "$response_file" "$status_token_tmp" "$secret_token_tmp"
+    return 1
+  fi
+  if ! mv -f "$secret_token_tmp" "$SECRET_TOKEN_FILE"; then
+    rm -f "$response_file" "$secret_token_tmp" "$STATUS_TOKEN_FILE"
+    return 1
+  fi
   rm -f "$response_file" "$ENROLLMENT_TOKEN_FILE"
 }
 
 complete_enrollment() {
-  [[ -r "$STATUS_TOKEN_FILE" ]] || return 0
+  [[ -r "$STATUS_TOKEN_FILE" && -s "$STATUS_TOKEN_FILE" ]] || return 0
   if curl_with_token "$STATUS_TOKEN_FILE" -fsS -X POST "$BASE_URL/api/bootstrap/complete" >/dev/null; then
     rm -f "$SECRET_TOKEN_FILE"
   fi
@@ -1070,7 +1091,7 @@ report_status() {
   local waiting="\${2:-false}"
   local event_id go_repo go_ref go_commit sync_json network_json process_json service_active logs error_count warn_count recent_json payload
 
-  [[ -r "$STATUS_TOKEN_FILE" ]] || return 0
+  [[ -r "$STATUS_TOKEN_FILE" && -s "$STATUS_TOKEN_FILE" ]] || return 0
 
   if [[ -n "$manifest" ]]; then
     event_id="$(printf '%s' "$manifest" | jq -r '.eventId')"
@@ -1175,7 +1196,7 @@ if [[ -n "$apply_at" ]]; then
   fi
 fi
 
-if [[ ! -r "$STATUS_TOKEN_FILE" ]]; then
+if [[ ! -r "$STATUS_TOKEN_FILE" || ! -s "$STATUS_TOKEN_FILE" ]]; then
   enroll_node
   manifest="$(try_auth_get "$BASE_URL/api/bootstrap/manifest")"
 fi
@@ -1456,6 +1477,7 @@ async function main() {
     const seedNode = state.seedNodes.find((candidate) => candidate.userId === user.id);
     const bootstrapRecord = pillar ?? seedNode;
     const enrollment = bootstrapRecord ? activeEnrollment(bootstrapRecord) : undefined;
+    response.setHeader("Cache-Control", "no-store");
     response.json({
       user,
       pillar: pillar ? toPublicPillar(pillar) : undefined,

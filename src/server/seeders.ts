@@ -35,6 +35,8 @@ for (const [address, prefix] of [
 for (const [address, prefix] of [
   ["::", 128],
   ["::1", 128],
+  ["64:ff9b::", 96],
+  ["64:ff9b:1::", 48],
   ["fc00::", 7],
   ["fe80::", 10],
   ["ff00::", 8],
