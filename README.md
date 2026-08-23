@@ -126,6 +126,28 @@ For remote access, use the Portainer profile behind its HTTPS proxy or an equiva
 
 The supplied Compose profiles set a canonical `PUBLIC_BASE_URL` and one trusted reverse-proxy hop. Custom production deployments must also set `PUBLIC_BASE_URL` to the exact external HTTPS origin and set `TRUST_PROXY_HOPS` to the exact number of trusted proxy hops. Request `Host` and forwarded-host headers are not used to construct privileged bootstrap URLs when the canonical origin is present.
 
+## Existing Docker Volume Upgrades
+
+Fresh named volumes are initialized for the non-root `node` user and require no migration. Images from before the non-root hardening change may have created `/app/data` and its contents as root. Repair that ownership once, before the first upgrade that starts the application as `node`.
+
+For the standalone Compose profile, stop the application and run the one-time helper with the same Compose project and environment configuration:
+
+```bash
+docker compose stop app
+docker compose run --rm --no-deps --user root --entrypoint sh app \
+  -c 'chown -R 1000:1000 /app/data && chmod 700 /app/data'
+docker compose up -d
+```
+
+For an existing Portainer deployment, open a console in the currently running pre-hardening `testnet-builder` container and run this before pulling and redeploying the stack:
+
+```bash
+chown -R 1000:1000 /app/data
+chmod 700 /app/data
+```
+
+The migration changes ownership only inside the mounted application state directory. Keep the existing volume and `APP_SECRET`, and do not replace the private mode with a world-writable permission such as `777`.
+
 ## Portainer With Existing Caddy
 
 Use `docker-compose.portainer.yml` when an existing Caddy Docker Proxy stack already handles TLS certificates and routing. This stack runs only the app container and attaches it to the external `root_proxy-net` network.
@@ -262,9 +284,10 @@ Sign in as `admin`, create operator accounts, collect pillar and seed-node regis
 
 When new commits are pushed to `main`:
 
-1. Open the stack in Portainer.
-2. Pull and redeploy the Git stack.
-3. Keep the same persistent volume and the same `APP_SECRET`.
+1. If this is the first update from a root-running image, complete the one-time volume ownership migration above.
+2. Open the stack in Portainer.
+3. Pull and redeploy the Git stack.
+4. Keep the same persistent volume and the same `APP_SECRET`.
 
 The app stores state in the named volume `zenon_testnet_builder_data` at `/app/data`.
 

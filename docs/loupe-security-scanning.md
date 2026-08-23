@@ -29,6 +29,9 @@ loupectl repo add \
 
 The safe initial policy is deliberate:
 
+- `max_concurrent_files` remains `1` to bound provider usage and keep the pilot
+  deliberately serial. Increase it only after reviewing measured usage and
+  scan behavior.
 - `--no-reporting` keeps findings in Loupe for manual triage until a tracker
   repository and scoped GitHub token are selected.
 - `--verification-enabled` asks a second agent to validate each candidate.

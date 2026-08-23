@@ -221,12 +221,15 @@ test("seed probing rejects local network targets and disables redirects", async 
 
 test("runtime container and browser assets use least-privilege local defaults", async () => {
   const dockerfile = await readFile("Dockerfile", "utf8");
+  const readme = await readFile("README.md", "utf8");
   const styles = await readFile("src/web/styles.css", "utf8");
 
   assert.match(dockerfile, /RUN npm ci/);
   assert.match(dockerfile, /install -d -o node -g node -m 700 \/app\/data/);
   assert.match(dockerfile, /USER node/);
   assert.doesNotMatch(dockerfile, /RUN npm install/);
+  assert.match(readme, /chown -R 1000:1000 \/app\/data/);
+  assert.doesNotMatch(readme, /chmod (?:-R )?777/);
   assert.doesNotMatch(styles, /fonts\.googleapis\.com/);
   assert.doesNotMatch(styles, /Space Grotesk|JetBrains Mono/);
 });
@@ -311,8 +314,10 @@ test("bootstrap credentials stay out of command arguments and persistent cron va
   assert.doesNotMatch(script, /ZNN_BOOTSTRAP_TOKEN=/);
   assert.match(script, /ZNN_CREDENTIAL_DIR=/);
   assert.match(script, /curl_with_token/);
-  assert.match(script, /secret_get "\$producer_url"/);
-  assert.match(script, /secret_get "\$network_private_key_url"/);
+  assert.match(script, /install_secret_file "\$producer_url" "\$ZNN_DIR\/wallet\/producer\.json" producer-wallet/);
+  assert.match(script, /install_secret_file "\$network_private_key_url" "\$ZNN_DIR\/network-private-key" network-private-key/);
+  assert.doesNotMatch(script, /secret_get "\$producer_url"\s*>/);
+  assert.match(script, /! -s "\$ENROLLMENT_SOURCE_FILE"/);
   assert.equal((server.match(/withSecretDownloadNode\(request, response/g) ?? []).length, 3);
 });
 
@@ -388,6 +393,75 @@ fi
     assert.equal(outcome.status, 0, outcome.stderr);
   } finally {
     await rm(credentialDir, { recursive: true, force: true });
+  }
+});
+
+test("bootstrap secret downloads validate and atomically replace destination files", async () => {
+  process.env.APP_SECRET = SYNTHETIC_SECRET;
+  const { bootstrapInstallScript } = await import("../dist/server/server/index.js");
+  const script = bootstrapInstallScript("https://testnet.invalid");
+  const functionMatch = script.match(
+    /secret_file_valid\(\) \{[\s\S]*?\n\}\n\ninstall_secret_file\(\) \{[\s\S]*?\n\}\n\ntry_auth_get\(\)/
+  );
+  assert.ok(functionMatch);
+
+  const secretDir = await mkdtemp(join(tmpdir(), "testnet-bootstrap-secrets-"));
+  const harness = `
+set -euo pipefail
+${functionMatch[0].replace(/\n\ntry_auth_get\(\)$/, "")}
+
+TARGET="$1/producer-password.txt"
+DOWNLOAD_MODE=failed
+
+secret_get() {
+  case "$DOWNLOAD_MODE" in
+    failed)
+      printf '%s' 'partial-new-value'
+      return 1
+      ;;
+    invalid)
+      printf '%s' 'too-short'
+      ;;
+    valid)
+      printf '%s\\n' 'abcdefghijklmnopqrstuvwx'
+      ;;
+    unexpected)
+      return 99
+      ;;
+  esac
+}
+
+printf '%s' 'old-partial' > "$TARGET"
+if install_secret_file 'https://testnet.invalid/password' "$TARGET" producer-password; then
+  exit 20
+fi
+[[ "$(<"$TARGET")" == 'old-partial' ]]
+
+DOWNLOAD_MODE=invalid
+if install_secret_file 'https://testnet.invalid/password' "$TARGET" producer-password; then
+  exit 21
+fi
+[[ "$(<"$TARGET")" == 'old-partial' ]]
+
+DOWNLOAD_MODE=valid
+install_secret_file 'https://testnet.invalid/password' "$TARGET" producer-password
+[[ "$(<"$TARGET")" == 'abcdefghijklmnopqrstuvwx' ]]
+
+DOWNLOAD_MODE=unexpected
+install_secret_file 'https://testnet.invalid/password' "$TARGET" producer-password
+if find "$1" -maxdepth 1 -name '.producer-password.txt.*' -print -quit | grep -q .; then
+  exit 22
+fi
+`;
+
+  try {
+    const outcome = spawnSync("bash", ["-c", harness, "bootstrap-secret-test", secretDir], {
+      cwd: process.cwd(),
+      encoding: "utf8"
+    });
+    assert.equal(outcome.status, 0, outcome.stderr);
+  } finally {
+    await rm(secretDir, { recursive: true, force: true });
   }
 });
 

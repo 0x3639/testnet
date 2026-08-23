@@ -1,5 +1,5 @@
 {
-  "max_concurrent_files": 4,
+  "max_concurrent_files": 1,
   "include_extensions": ["js", "mjs", "ts", "tsx"],
   "extra_source_paths": [
     "src",

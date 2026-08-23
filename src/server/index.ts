@@ -730,8 +730,8 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 ENROLLMENT_SOURCE_FILE="\${ZNN_ENROLLMENT_TOKEN_FILE:-}"
-if [[ -z "$ENROLLMENT_SOURCE_FILE" || ! -r "$ENROLLMENT_SOURCE_FILE" ]]; then
-  echo "Set ZNN_ENROLLMENT_TOKEN_FILE to a readable mode-600 enrollment token file." >&2
+if [[ -z "$ENROLLMENT_SOURCE_FILE" || ! -r "$ENROLLMENT_SOURCE_FILE" || ! -s "$ENROLLMENT_SOURCE_FILE" ]]; then
+  echo "Set ZNN_ENROLLMENT_TOKEN_FILE to a readable, non-empty mode-600 enrollment token file." >&2
   exit 1
 fi
 
@@ -834,6 +834,52 @@ secret_get() {
     return 1
   fi
   curl_with_token "$SECRET_TOKEN_FILE" -fsSL "$1"
+}
+
+secret_file_valid() {
+  local file="$1" kind="$2" value
+  [[ -r "$file" && -s "$file" ]] || return 1
+
+  case "$kind" in
+    producer-wallet)
+      jq -e 'type == "object" and length > 0' "$file" >/dev/null 2>&1
+      ;;
+    producer-password)
+      value="$(tr -d '\\r\\n' < "$file")"
+      [[ "$value" =~ ^[A-Za-z0-9_-]{24}$ ]]
+      ;;
+    network-private-key)
+      value="$(tr -d '\\r\\n' < "$file")"
+      [[ "$value" =~ ^[0-9a-fA-F]{64}$ ]]
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+install_secret_file() {
+  local url="$1" destination="$2" kind="$3" destination_dir temp_file=""
+
+  if secret_file_valid "$destination" "$kind"; then
+    chmod 600 "$destination"
+    return 0
+  fi
+
+  destination_dir="$(dirname -- "$destination")"
+  if ! temp_file="$(mktemp "$destination_dir/.$(basename -- "$destination").XXXXXX")"; then
+    return 1
+  fi
+  if ! chmod 600 "$temp_file" ||
+     ! secret_get "$url" > "$temp_file" ||
+     ! secret_file_valid "$temp_file" "$kind"; then
+    rm -f -- "$temp_file"
+    return 1
+  fi
+  if ! mv -f -- "$temp_file" "$destination"; then
+    rm -f -- "$temp_file"
+    return 1
+  fi
 }
 
 try_auth_get() {
@@ -988,9 +1034,11 @@ install_release() {
 
   artifacts_ready=false
   if [[ -s "$ZNN_DIR/genesis.json" && -s "$ZNN_DIR/config.json" ]]; then
-    if [[ "$node_type" == "seed" && -s "$ZNN_DIR/network-private-key" ]]; then
+    if [[ "$node_type" == "seed" ]] && secret_file_valid "$ZNN_DIR/network-private-key" network-private-key; then
       artifacts_ready=true
-    elif [[ "$node_type" != "seed" && -s "$ZNN_DIR/wallet/producer.json" && -s "$ZNN_DIR/wallet/producer-password.txt" ]]; then
+    elif [[ "$node_type" != "seed" ]] &&
+         secret_file_valid "$ZNN_DIR/wallet/producer.json" producer-wallet &&
+         secret_file_valid "$ZNN_DIR/wallet/producer-password.txt" producer-password; then
       artifacts_ready=true
     fi
   fi
@@ -1001,14 +1049,14 @@ install_release() {
 
   mkdir -p "$ZNN_DIR/wallet"
   chmod 700 "$ZNN_DIR" "$ZNN_DIR/wallet"
-  if [[ -n "$producer_url" && ! -s "$ZNN_DIR/wallet/producer.json" ]]; then
-    secret_get "$producer_url" > "$ZNN_DIR/wallet/producer.json"
+  if [[ -n "$producer_url" ]]; then
+    install_secret_file "$producer_url" "$ZNN_DIR/wallet/producer.json" producer-wallet
   fi
-  if [[ -n "$producer_password_url" && ! -s "$ZNN_DIR/wallet/producer-password.txt" ]]; then
-    secret_get "$producer_password_url" > "$ZNN_DIR/wallet/producer-password.txt"
+  if [[ -n "$producer_password_url" ]]; then
+    install_secret_file "$producer_password_url" "$ZNN_DIR/wallet/producer-password.txt" producer-password
   fi
-  if [[ -n "$network_private_key_url" && ! -s "$ZNN_DIR/network-private-key" ]]; then
-    secret_get "$network_private_key_url" > "$ZNN_DIR/network-private-key"
+  if [[ -n "$network_private_key_url" ]]; then
+    install_secret_file "$network_private_key_url" "$ZNN_DIR/network-private-key" network-private-key
   fi
   [[ -f "$ZNN_DIR/wallet/producer.json" ]] && chmod 600 "$ZNN_DIR/wallet/producer.json"
   [[ -f "$ZNN_DIR/wallet/producer-password.txt" ]] && chmod 600 "$ZNN_DIR/wallet/producer-password.txt"
