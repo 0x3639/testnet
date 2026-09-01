@@ -640,6 +640,33 @@ th {
   padding-bottom: 0;
 }
 
+.fundHeader,
+.fundRow {
+  display: grid;
+  grid-template-columns: minmax(360px, 2.3fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr) 40px;
+  gap: 12px;
+  align-items: center;
+}
+
+.fundHeader {
+  color: var(--muted);
+  font-size: 0.86rem;
+  padding-bottom: 8px;
+}
+
+.fundHeader span {
+  min-width: 0;
+}
+
+.fundRow {
+  border-top: 1px solid var(--border);
+  padding: 10px 0;
+}
+
+.fundRow:last-child {
+  padding-bottom: 0;
+}
+
 .sporkActiveRow {
   display: flex;
   align-items: center;
@@ -835,7 +862,8 @@ pre {
   .credentialRows,
   .publishedHeader,
   .publishedRow,
-  .sporkRow {
+  .sporkRow,
+  .fundRow {
     grid-template-columns: 1fr;
   }
 

@@ -14,6 +14,15 @@ export const PILLAR_LIQUID_QSR = 500_000;
 export const FUSED_QSR_PER_ADDRESS = 1_000;
 export const DEFAULT_SPORKS_VERSION = 2;
 
+export const DEFAULT_GENESIS_FUNDS = [
+  {
+    address: "z1qpmvh8p6saaghwnakmryxrr3qtcg495dhnlmwg",
+    znn: 100_000,
+    qsr: 1_000_000,
+    fusedQsr: 5_000
+  }
+];
+
 export const DEFAULT_SPORKS = [
   {
     id: "6d2b1e6cb4025f2f45533f0fe22e9b7ce2014d91cc960471045fa64eee5a6ba3",

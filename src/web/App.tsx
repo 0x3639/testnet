@@ -21,6 +21,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AdminOverview,
   AuthUser,
+  GenesisFundRecord,
   ManagedUser,
   PublishedArtifactsInfo,
   PublicNetworkSettings,
@@ -118,7 +119,8 @@ function settingsKey(settings: PublicNetworkSettings): string {
     wipeDataOnPublish: settings.wipeDataOnPublish,
     seeders: settings.seeders.filter(Boolean),
     bootstrapPeers: settings.bootstrapPeers.filter(Boolean),
-    sporks: settings.sporks
+    sporks: settings.sporks,
+    genesisFunds: settings.genesisFunds
   });
 }
 
@@ -1303,6 +1305,135 @@ function GenesisSporkEditor({
   );
 }
 
+function GenesisFundingEditor({
+  draft,
+  setDraft,
+  onSave
+}: {
+  draft: PublicNetworkSettings;
+  setDraft: React.Dispatch<React.SetStateAction<PublicNetworkSettings>>;
+  onSave: (settings: PublicNetworkSettings) => Promise<void>;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  function updateFund(index: number, updates: Partial<GenesisFundRecord>) {
+    setDraft((current) => ({
+      ...current,
+      genesisFunds: current.genesisFunds.map((fund, candidateIndex) => (candidateIndex === index ? { ...fund, ...updates } : fund))
+    }));
+  }
+
+  function addFund() {
+    setDraft((current) => ({
+      ...current,
+      genesisFunds: [
+        ...current.genesisFunds,
+        {
+          address: "",
+          znn: 0,
+          qsr: 0,
+          fusedQsr: 0
+        }
+      ]
+    }));
+  }
+
+  function removeFund(index: number) {
+    setDraft((current) => ({
+      ...current,
+      genesisFunds: current.genesisFunds.filter((_fund, candidateIndex) => candidateIndex !== index)
+    }));
+  }
+
+  async function saveFunds(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await onSave({
+        ...draft,
+        seeders: draft.seeders.filter(Boolean),
+        bootstrapPeers: draft.bootstrapPeers.filter(Boolean)
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="genesisSporkPanel" onSubmit={saveFunds}>
+      <div className="panelHeader">
+        <div>
+          <span className="ledger">Genesis</span>
+          <h2>Funded Addresses</h2>
+        </div>
+        <div className="toolbar compactToolbar">
+          <Button variant="secondary" icon={<Plus size={18} />} onClick={addFund}>
+            Add Address
+          </Button>
+          <Button type="submit" icon={<Save size={18} />} disabled={saving}>
+            {saving ? "Saving" : "Save Funding"}
+          </Button>
+        </div>
+      </div>
+      <div className="sporkRows">
+        <div className="fundHeader" aria-hidden="true">
+          <span>Address</span>
+          <span>ZNN</span>
+          <span>QSR</span>
+          <span>Fused QSR</span>
+          <span />
+        </div>
+        {draft.genesisFunds.map((fund, index) => (
+          <div className="fundRow" key={index}>
+            <input
+              aria-label="Funded address"
+              className="mono"
+              value={fund.address}
+              required
+              pattern="z1[0-9a-z]{38}"
+              placeholder="z1..."
+              onChange={(event) => updateFund(index, { address: event.target.value.trim() })}
+            />
+            <input
+              aria-label="ZNN amount"
+              className="mono"
+              type="number"
+              min={0}
+              value={fund.znn}
+              onChange={(event) => updateFund(index, { znn: Number(event.target.value) })}
+            />
+            <input
+              aria-label="QSR amount"
+              className="mono"
+              type="number"
+              min={0}
+              value={fund.qsr}
+              onChange={(event) => updateFund(index, { qsr: Number(event.target.value) })}
+            />
+            <input
+              aria-label="Fused QSR amount"
+              className="mono"
+              type="number"
+              min={0}
+              value={fund.fusedQsr}
+              onChange={(event) => updateFund(index, { fusedQsr: Number(event.target.value) })}
+            />
+            <button className="sporkDeleteButton" type="button" onClick={() => removeFund(index)} aria-label={`Delete ${fund.address || "funded address"}`}>
+              <X size={22} />
+            </button>
+          </div>
+        ))}
+        {draft.genesisFunds.length === 0 ? <div className="emptyState">No funded addresses configured</div> : null}
+      </div>
+      {error ? <div className="alert">{error}</div> : null}
+    </form>
+  );
+}
+
 function AdminView({ session, refresh, refreshState }: { session: AdminOverview; refresh: () => Promise<void>; refreshState: RefreshState }) {
   const [tab, setTab] = useState<"genesis" | "config">("genesis");
   const [settingsDraft, setSettingsDraft] = useState(session.settings);
@@ -1368,7 +1499,8 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
         wipeDataOnPublish: settings.wipeDataOnPublish,
         seeders: settings.seeders,
         bootstrapPeers: settings.bootstrapPeers,
-        sporks: settings.sporks
+        sporks: settings.sporks,
+        genesisFunds: settings.genesisFunds
       })
     });
     await refresh();
@@ -1678,7 +1810,12 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
         </div>
         {session.finalizedAt ? <div className="successLine">Finalized {new Date(session.finalizedAt).toLocaleString()}</div> : null}
         {session.published ? <PublishedArtifacts published={session.published} /> : null}
-        {tab === "genesis" ? <GenesisSporkEditor draft={settingsDraft} setDraft={setSettingsDraft} onSave={saveSettings} /> : null}
+        {tab === "genesis" ? (
+          <>
+            <GenesisSporkEditor draft={settingsDraft} setDraft={setSettingsDraft} onSave={saveSettings} />
+            <GenesisFundingEditor draft={settingsDraft} setDraft={setSettingsDraft} onSave={saveSettings} />
+          </>
+        ) : null}
         <pre>{json}</pre>
       </section>
     </div>

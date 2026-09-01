@@ -98,7 +98,18 @@ const settingsSchema = z.object({
       activated: z.boolean(),
       enforcementHeight: z.number().int().min(0)
     })
-  )
+  ),
+  genesisFunds: z
+    .array(
+      z.object({
+        address: z.string().trim().regex(/^z1[0-9a-z]{38}$/, "Address must be a z1... Zenon address"),
+        znn: z.number().int().min(0),
+        qsr: z.number().int().min(0),
+        fusedQsr: z.number().int().min(0)
+      })
+    )
+    .max(100)
+    .optional()
 });
 
 const seedNodeProbeSchema = z.object({
@@ -416,7 +427,8 @@ function genesisSettingsKey(settings: NetworkSettings): string {
     genesisTimestampSec: settings.genesisTimestampSec,
     seeders: settings.seeders,
     bootstrapPeers: settings.bootstrapPeers,
-    sporks: settings.sporks
+    sporks: settings.sporks,
+    genesisFunds: settings.genesisFunds
   });
 }
 
@@ -1245,7 +1257,8 @@ async function main() {
         ...parsed.data,
         minPillars: Math.min(parsed.data.minPillars, parsed.data.expectedPillars),
         goZenonCommit: parsed.data.goZenonCommit || undefined,
-        bootstrapPeers
+        bootstrapPeers,
+        genesisFunds: parsed.data.genesisFunds ?? state.settings.genesisFunds
       };
       if (genesisSettingsKey(state.settings) !== beforeGenesisSettings) {
         state.finalizedGenesis = undefined;

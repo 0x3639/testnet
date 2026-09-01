@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { DEFAULT_SPORKS, DEFAULT_SPORKS_VERSION } from "./constants.js";
+import { DEFAULT_GENESIS_FUNDS, DEFAULT_SPORKS, DEFAULT_SPORKS_VERSION } from "./constants.js";
 import { multiaddrFromEnode, multiaddrFromPublicKey } from "./libp2p.js";
 import type { AppState, NetworkSettings } from "../shared/types.js";
 
@@ -31,7 +31,8 @@ function defaultSettings(): NetworkSettings {
     sporkAddress: "",
     seeders: [],
     bootstrapPeers: [],
-    sporks: DEFAULT_SPORKS.map((spork) => ({ ...spork }))
+    sporks: DEFAULT_SPORKS.map((spork) => ({ ...spork })),
+    genesisFunds: DEFAULT_GENESIS_FUNDS.map((fund) => ({ ...fund }))
   };
 }
 
@@ -97,7 +98,8 @@ function normalizeState(state: Partial<AppState>): AppState {
       ...settings,
       seeders,
       bootstrapPeers: settings.bootstrapPeers ?? derivedBootstrapPeers,
-      sporks: mergeDefaultSporks(sporks, state.defaultSporksVersion)
+      sporks: mergeDefaultSporks(sporks, state.defaultSporksVersion),
+      genesisFunds: settings.genesisFunds ?? settingsDefaults.genesisFunds
     },
     defaultSporksVersion: DEFAULT_SPORKS_VERSION
   };

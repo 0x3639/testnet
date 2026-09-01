@@ -53,6 +53,13 @@ export interface SeedNodeRecord {
   createdAt: string;
 }
 
+export interface GenesisFundRecord {
+  address: string;
+  znn: number;
+  qsr: number;
+  fusedQsr: number;
+}
+
 export interface SporkRecord {
   id: string;
   name: string;
@@ -79,6 +86,7 @@ export interface NetworkSettings {
   seeders: string[];
   bootstrapPeers: string[];
   sporks: SporkRecord[];
+  genesisFunds: GenesisFundRecord[];
 }
 
 export type PublicNetworkSettings = Omit<NetworkSettings, "sporkWallet"> & {

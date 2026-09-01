@@ -48,14 +48,25 @@ function balanceBlock(address: string, balanceList: Record<string, number>) {
   };
 }
 
-function fusion(owner: string, beneficiary: string, idSeed: string) {
+function fusion(owner: string, beneficiary: string, idSeed: string, amount = units(FUSED_QSR_PER_ADDRESS)) {
   return {
     owner,
     id: stableHashHex(idSeed),
-    amount: units(FUSED_QSR_PER_ADDRESS),
+    amount,
     withdrawHeight: 0,
     beneficiaryAddress: beneficiary
   };
+}
+
+function mergeBalances(blocks: Array<{ Address: string; BalanceList: Record<string, number> }>, address: string, balanceList: Record<string, number>) {
+  const existing = blocks.find((block) => block.Address === address);
+  if (!existing) {
+    blocks.push(balanceBlock(address, balanceList));
+    return;
+  }
+  for (const [zts, amount] of Object.entries(balanceList)) {
+    existing.BalanceList[zts] = (existing.BalanceList[zts] ?? 0) + amount;
+  }
 }
 
 export function buildGenesis(settings: NetworkSettings, pillars: PillarRecord[]) {
@@ -64,7 +75,11 @@ export function buildGenesis(settings: NetworkSettings, pillars: PillarRecord[])
   const pillarStakeTotal = units(PILLAR_STAKE_ZNN) * pillarCount;
   const liquidZnnTotal = units(PILLAR_LIQUID_ZNN) * pillarCount;
   const liquidQsrTotal = units(PILLAR_LIQUID_QSR) * pillarCount;
-  const fusionTotal = units(FUSED_QSR_PER_ADDRESS) * 3 * pillarCount;
+  const genesisFunds = settings.genesisFunds ?? [];
+  const fundedZnnTotal = genesisFunds.reduce((total, fund) => total + units(fund.znn), 0);
+  const fundedQsrTotal = genesisFunds.reduce((total, fund) => total + units(fund.qsr), 0);
+  const fundedFusionTotal = genesisFunds.reduce((total, fund) => total + units(fund.fusedQsr), 0);
+  const fusionTotal = units(FUSED_QSR_PER_ADDRESS) * 3 * pillarCount + fundedFusionTotal;
 
   const blocks = [
     balanceBlock(PILLAR_CONTRACT, {
@@ -84,6 +99,13 @@ export function buildGenesis(settings: NetworkSettings, pillars: PillarRecord[])
       })
     )
   ];
+  for (const fund of genesisFunds) {
+    if (fund.znn <= 0 && fund.qsr <= 0) continue;
+    mergeBalances(blocks, fund.address, {
+      [ZNN_ZTS]: units(fund.znn),
+      [QSR_ZTS]: units(fund.qsr)
+    });
+  }
 
   return {
     ChainIdentifier: settings.chainIdentifier,
@@ -110,11 +132,16 @@ export function buildGenesis(settings: NetworkSettings, pillars: PillarRecord[])
       LegacyEntries: []
     },
     PlasmaConfig: {
-      Fusions: activePillars.flatMap((pillar) => [
-        fusion(pillar.producerWallet.address, pillar.producerWallet.address, `${pillar.id}:producer`),
-        fusion(pillar.pillarWallet.address, pillar.pillarWallet.address, `${pillar.id}:pillar`),
-        fusion(pillar.rewardWallet.address, pillar.rewardWallet.address, `${pillar.id}:reward`)
-      ])
+      Fusions: [
+        ...activePillars.flatMap((pillar) => [
+          fusion(pillar.producerWallet.address, pillar.producerWallet.address, `${pillar.id}:producer`),
+          fusion(pillar.pillarWallet.address, pillar.pillarWallet.address, `${pillar.id}:pillar`),
+          fusion(pillar.rewardWallet.address, pillar.rewardWallet.address, `${pillar.id}:reward`)
+        ]),
+        ...genesisFunds
+          .filter((fund) => fund.fusedQsr > 0)
+          .map((fund) => fusion(fund.address, fund.address, `fund:${fund.address}`, units(fund.fusedQsr)))
+      ]
     },
     SporkConfig: {
       Sporks: settings.sporks.map((spork) => ({
@@ -138,7 +165,7 @@ export function buildGenesis(settings: NetworkSettings, pillars: PillarRecord[])
           tokenName: "ZNN",
           tokenStandard: ZNN_ZTS,
           tokenSymbol: "ZNN",
-          totalSupply: pillarStakeTotal + liquidZnnTotal
+          totalSupply: pillarStakeTotal + liquidZnnTotal + fundedZnnTotal
         },
         {
           decimals: 8,
@@ -151,7 +178,7 @@ export function buildGenesis(settings: NetworkSettings, pillars: PillarRecord[])
           tokenName: "QSR",
           tokenStandard: QSR_ZTS,
           tokenSymbol: "QSR",
-          totalSupply: fusionTotal + liquidQsrTotal
+          totalSupply: fusionTotal + liquidQsrTotal + fundedQsrTotal
         }
       ]
     },
