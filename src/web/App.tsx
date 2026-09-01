@@ -387,9 +387,7 @@ function Landing({ onLogin }: { onLogin: (session: Session) => void }) {
             <span className="linkCardUrl mono">faucet.zenonhub.io</span>
           </a>
           <a className="linkCard" href="https://explorer.testnet.zenon.info" target="_blank" rel="noreferrer">
-            <span className="ledger">
-              Explorer <em className="soonTag">coming soon</em>
-            </span>
+            <span className="ledger">Explorer</span>
             <strong>Track momentums &amp; transactions</strong>
             <span className="linkCardUrl mono">explorer.testnet.zenon.info</span>
           </a>
@@ -408,7 +406,7 @@ function Landing({ onLogin }: { onLogin: (session: Session) => void }) {
             </li>
             <li>
               <strong>Verify</strong>
-              <span>Watch your transactions land in the explorer once it goes live.</span>
+              <span>Watch your transactions land in the explorer.</span>
             </li>
           </ol>
         </section>

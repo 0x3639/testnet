@@ -21,7 +21,7 @@ Both run on standard TLS ports — do not append a port number. The node exposes
 
 ## Explorer
 
-- https://explorer.testnet.zenon.info — block/momentum and transaction explorer (coming soon).
+- https://explorer.testnet.zenon.info — block/momentum and transaction explorer.
 
 ## Machine-readable APIs on this site
 
