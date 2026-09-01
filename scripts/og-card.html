@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500&family=Space+Grotesk:wght@500;700&display=swap" />
+<style>
+  * { margin: 0; box-sizing: border-box; }
+  body { width: 1200px; height: 630px; overflow: hidden; background: #151515; color: #f4f7f5; font-family: "Space Grotesk", sans-serif; }
+  .card { position: relative; width: 1200px; height: 630px; padding: 72px 80px; display: flex; flex-direction: column; justify-content: space-between; border-top: 10px solid; border-image: linear-gradient(90deg, #00d557, #27e6c0 48%, #0061eb) 1; }
+  .mark { width: 104px; height: 104px; border-radius: 22px; background: linear-gradient(135deg, #00d557, #27e6c0 48%, #0061eb); display: grid; place-items: center; }
+  .mark svg { width: 62px; height: 62px; }
+  h1 { font-size: 92px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.02; margin-top: 40px; }
+  .sub { color: #a3aca7; font-size: 38px; font-weight: 500; margin-top: 14px; }
+  .rpc { display: inline-flex; align-items: center; gap: 18px; font-family: "JetBrains Mono", monospace; font-size: 30px; color: #00d557; background: #1d1f1e; border: 1px solid #313735; border-radius: 12px; padding: 20px 28px; align-self: flex-start; }
+  .rpc span.label { color: #a3aca7; font-size: 20px; letter-spacing: 0.1em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div>
+      <div class="mark">
+        <svg viewBox="0 0 64 64"><polygon points="18,16 46,16 46,23 29,41 46,41 46,48 18,48 18,41 35,23 18,23" fill="#041008"/></svg>
+      </div>
+      <h1>Zenon Testnet</h1>
+      <div class="sub">A public Network of Momentum testnet &mdash; free RPC, faucet &amp; explorer</div>
+    </div>
+    <div class="rpc"><span class="label">RPC</span> https://rpc.testnet.zenon.info</div>
+  </div>
+</body>
+</html>

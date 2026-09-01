@@ -1,0 +1,39 @@
+# Zenon Testnet
+
+> A public, community-run testnet for Zenon Network of Momentum (NoM). Free to use for wallets, SDKs, tooling, and protocol experiments. No registration or API key required.
+
+Connect any Zenon client (znn-cli, the Dart/TypeScript SDKs, or the Syrius wallet) to the RPC endpoints below, fund an address from the faucet, and start sending transactions.
+
+## RPC endpoints
+
+- WebSocket: wss://rpc.testnet.zenon.info (JSON-RPC 2.0 over WebSocket; supports subscriptions)
+- HTTPS: https://rpc.testnet.zenon.info (JSON-RPC 2.0 over HTTP POST)
+
+Both run on standard TLS ports — do not append a port number. The node exposes the standard go-zenon JSON-RPC namespaces: `ledger`, `stats`, `embedded`, and `subscribe` (WebSocket only). Example call:
+
+    curl -s https://rpc.testnet.zenon.info -X POST \
+      -H 'Content-Type: application/json' \
+      -d '{"jsonrpc":"2.0","id":1,"method":"stats.networkInfo","params":[]}'
+
+## Test funds
+
+- Faucet: https://faucet.zenonhub.io/ — request free testnet ZNN and QSR for any address you control. Testnet tokens have no monetary value.
+
+## Explorer
+
+- https://explorer.testnet.zenon.info — block/momentum and transaction explorer (coming soon).
+
+## Machine-readable APIs on this site
+
+- [Network stats](https://testnet.zenon.info/api/public/stats): GET returns JSON with `chainIdentifier`, `genesisTimestampSec`, `goZenonRepo`, `goZenonRef`, `goZenonCommit`, `pillarCount`, `expectedPillars`, `seedNodeCount`, `activeNodes` (nodes reporting within the last 5 minutes), `totalNodes`, and `publishedAt`.
+- [Genesis file](https://testnet.zenon.info/genesis.json): the published genesis.json for this network (404 until published).
+- [Node config template](https://testnet.zenon.info/config.json): the published go-zenon config template (404 until published).
+- [Node plan](https://testnet.zenon.info/node-plan.json): the published release/deployment plan for node operators (404 until published).
+
+## Node software
+
+- Source: https://github.com/zenon-network/go-zenon — the network runs a build of go-zenon; the exact repo, branch, and commit currently deployed are reported by the network stats API above.
+
+## For node operators
+
+Pillar and seed-node operators registered with this testnet sign in at https://testnet.zenon.info/ (Operator Login, upper right) to download node packages and report status. Operator accounts are provisioned by the testnet admin.

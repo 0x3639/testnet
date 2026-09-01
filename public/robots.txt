@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# Machine-readable overview of this site for LLMs and agents
+# https://testnet.zenon.info/llms.txt
