@@ -18,10 +18,12 @@ import type {
   NetworkSettings,
   NetworkSettingsSnapshot,
   NodeStatusReport,
+  PillarNodeStatus,
   PillarRecord,
   PublishedArtifacts,
   PublishedArtifactsInfo,
   PublicNetworkSettings,
+  PublicStats,
   SeedNodeRecord
 } from "../shared/types.js";
 
@@ -1022,6 +1024,31 @@ async function main() {
 
   app.get("/api/health", (_request, response) => {
     response.json({ ok: true });
+  });
+
+  app.get("/api/public/stats", async (_request, response) => {
+    const state = await readState();
+    const now = Date.now();
+    const isActive = (nodeStatus?: PillarNodeStatus) => {
+      const receivedAt = nodeStatus?.latest?.receivedAt;
+      return Boolean(receivedAt) && now - new Date(receivedAt as string).getTime() < 5 * 60_000;
+    };
+    const nodes = [...state.pillars, ...state.seedNodes];
+    const stats: PublicStats = {
+      chainIdentifier: state.settings.chainIdentifier,
+      genesisTimestampSec: state.settings.genesisTimestampSec,
+      goZenonRepo: state.settings.goZenonRepo,
+      goZenonRef: state.settings.goZenonRef,
+      goZenonCommit: state.settings.goZenonCommit,
+      pillarCount: state.pillars.length,
+      expectedPillars: state.settings.expectedPillars,
+      seedNodeCount: state.seedNodes.length,
+      activeNodes: nodes.filter((node) => isActive(node.nodeStatus)).length,
+      totalNodes: nodes.length,
+      publishedAt: state.publishedArtifacts?.publishedAt
+    };
+    response.setHeader("Cache-Control", "no-store");
+    response.json(stats);
   });
 
   app.get(PUBLIC_GENESIS_PATH, async (_request, response) => {

@@ -282,6 +282,20 @@ export interface UserOverview {
   };
 }
 
+export interface PublicStats {
+  chainIdentifier: number;
+  genesisTimestampSec: number;
+  goZenonRepo: string;
+  goZenonRef: string;
+  goZenonCommit?: string;
+  pillarCount: number;
+  expectedPillars: number;
+  seedNodeCount: number;
+  activeNodes: number;
+  totalNodes: number;
+  publishedAt?: string;
+}
+
 export interface SeedNodeProbeResult {
   ip: string;
   rpcPort: number;

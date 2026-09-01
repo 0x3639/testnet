@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   CheckCircle2,
   Copy,
   Download,
@@ -27,6 +28,7 @@ import type {
   PublicNetworkSettings,
   PublicPillar,
   PublicSeedNode,
+  PublicStats,
   ReadinessCheck,
   Role,
   SeedNodeProbeResult,
@@ -178,7 +180,7 @@ function RefreshButton({ refresh, state }: { refresh: () => Promise<void>; state
   );
 }
 
-function Login({ onLogin }: { onLogin: (session: Session) => void }) {
+function Login({ onLogin, onBack }: { onLogin: (session: Session) => void; onBack?: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -227,9 +229,198 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
           <Button type="submit" icon={<KeyRound size={18} />} disabled={loading}>
             {loading ? "Signing in" : "Sign in"}
           </Button>
+          {onBack ? (
+            <Button variant="ghost" icon={<ArrowLeft size={18} />} onClick={onBack}>
+              Back to testnet info
+            </Button>
+          ) : null}
         </form>
       </section>
     </main>
+  );
+}
+
+const RPC_ENDPOINTS = [
+  { label: "WebSocket", url: "wss://rpc.testnet.zenon.info" },
+  { label: "HTTPS", url: "https://rpc.testnet.zenon.info" }
+];
+
+function repoShortName(repoUrl: string): string {
+  return repoUrl.replace(/^https?:\/\/(www\.)?github\.com\//, "").replace(/\.git$/, "") || repoUrl;
+}
+
+function EndpointRow({ label, url }: { label: string; url: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className="endpointRow"
+      type="button"
+      onClick={() => {
+        copy(url);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1600);
+      }}
+      aria-label={`Copy ${label} endpoint`}
+    >
+      <span className="endpointLabel">{label}</span>
+      <span className="endpointUrl mono">{url}</span>
+      <span className={`endpointCopy${copied ? " copied" : ""}`}>
+        {copied ? <CheckCircle2 size={16} /> : <Copy size={16} />}
+        {copied ? "Copied" : "Copy"}
+      </span>
+    </button>
+  );
+}
+
+function StatTile({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
+  return (
+    <div className="statTile">
+      <span className="ledger">{label}</span>
+      <strong className="mono">{value}</strong>
+      {hint ? <small>{hint}</small> : null}
+    </div>
+  );
+}
+
+function Landing({ onLogin }: { onLogin: (session: Session) => void }) {
+  const [showLogin, setShowLogin] = useState(false);
+  const [stats, setStats] = useState<PublicStats | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      void api<PublicStats>("/api/public/stats")
+        .then((next) => {
+          if (!cancelled) setStats(next);
+        })
+        .catch(() => undefined);
+    };
+    load();
+    const interval = window.setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  if (showLogin) {
+    return <Login onLogin={onLogin} onBack={() => setShowLogin(false)} />;
+  }
+
+  const networkLive = Boolean(stats && stats.activeNodes > 0);
+  return (
+    <div className="landing">
+      <header className="landingTopbar">
+        <div className="brand">
+          <div className="logoBox">
+            <Server size={22} />
+          </div>
+          <div>
+            <strong>Zenon Testnet</strong>
+            <span>Network of Momentum</span>
+          </div>
+        </div>
+        <Button variant="secondary" icon={<KeyRound size={18} />} onClick={() => setShowLogin(true)}>
+          Operator Login
+        </Button>
+      </header>
+
+      <main className="landingMain">
+        <section className="landingHero">
+          <span className="ledger">Public testnet</span>
+          <h1>Build on the Network of Momentum</h1>
+          <p>
+            A community-run Zenon testnet for wallets, tooling, and protocol experiments. Connect over RPC, fund an
+            address from the faucet, and start sending transactions.
+          </p>
+          <div className="endpointBlock">
+            {RPC_ENDPOINTS.map((endpoint) => (
+              <EndpointRow key={endpoint.url} label={endpoint.label} url={endpoint.url} />
+            ))}
+            <small className="endpointNote">Standard TLS ports — nothing to append.</small>
+          </div>
+        </section>
+
+        <section className="landingStats">
+          <div className="statsHeader">
+            <span className={`liveDot${networkLive ? " on" : ""}`} aria-hidden="true" />
+            <span className="ledger">{networkLive ? "Network live" : "Network status"}</span>
+          </div>
+          <div className="statTiles">
+            <StatTile
+              label="Active nodes"
+              value={stats ? `${stats.activeNodes}/${stats.totalNodes}` : "—"}
+              hint="reported in last 5 min"
+            />
+            <StatTile
+              label="Pillars"
+              value={stats ? `${stats.pillarCount}/${stats.expectedPillars}` : "—"}
+              hint="registered/expected"
+            />
+            <StatTile label="Seed nodes" value={stats ? stats.seedNodeCount : "—"} />
+            <StatTile label="Chain ID" value={stats ? stats.chainIdentifier : "—"} />
+            <StatTile
+              label="Node software"
+              value={
+                stats ? (
+                  <a href={stats.goZenonRepo.replace(/\.git$/, "")} target="_blank" rel="noreferrer">
+                    {repoShortName(stats.goZenonRepo)}
+                  </a>
+                ) : (
+                  "—"
+                )
+              }
+              hint={stats ? `${stats.goZenonRef}${stats.goZenonCommit ? ` @ ${stats.goZenonCommit.slice(0, 8)}` : ""}` : undefined}
+            />
+            <StatTile
+              label="Genesis"
+              value={stats ? new Date(stats.genesisTimestampSec * 1000).toISOString().slice(0, 10) : "—"}
+              hint={stats?.publishedAt ? `published ${formatUtc(stats.publishedAt)}` : undefined}
+            />
+          </div>
+        </section>
+
+        <section className="linkCards">
+          <a className="linkCard" href="https://faucet.zenonhub.io/" target="_blank" rel="noreferrer">
+            <span className="ledger">Faucet</span>
+            <strong>Get testnet ZNN &amp; QSR</strong>
+            <span className="linkCardUrl mono">faucet.zenonhub.io</span>
+          </a>
+          <a className="linkCard" href="https://explorer.testnet.zenon.info" target="_blank" rel="noreferrer">
+            <span className="ledger">
+              Explorer <em className="soonTag">coming soon</em>
+            </span>
+            <strong>Track momentums &amp; transactions</strong>
+            <span className="linkCardUrl mono">explorer.testnet.zenon.info</span>
+          </a>
+        </section>
+
+        <section className="landingSteps">
+          <span className="ledger">Using the testnet</span>
+          <ol>
+            <li>
+              <strong>Connect</strong>
+              <span>Point znn-cli, an SDK, or your wallet at either RPC endpoint above.</span>
+            </li>
+            <li>
+              <strong>Get funded</strong>
+              <span>Request testnet ZNN and QSR from the faucet for an address you control.</span>
+            </li>
+            <li>
+              <strong>Verify</strong>
+              <span>Watch your transactions land in the explorer once it goes live.</span>
+            </li>
+          </ol>
+        </section>
+      </main>
+
+      <footer className="landingFooter">
+        <span>Running a pillar or seed node for this testnet?</span>
+        <button className="linkButton" type="button" onClick={() => setShowLogin(true)}>
+          Sign in to manage your node
+        </button>
+      </footer>
+    </div>
   );
 }
 
@@ -1882,7 +2073,7 @@ export function App() {
   }
 
   if (loading) return <div className="loading">Loading</div>;
-  if (!session) return <Login onLogin={setSession} />;
+  if (!session) return <Landing onLogin={setSession} />;
 
   return (
     <Shell user={session.user} onLogout={logout}>

@@ -810,6 +810,307 @@ pre {
   line-height: 1.5;
 }
 
+.landing {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.landingTopbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  padding: 16px clamp(20px, 5vw, 48px);
+}
+
+.landingMain {
+  width: min(960px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: clamp(36px, 6vw, 56px);
+  padding: clamp(36px, 7vw, 72px) 20px 48px;
+}
+
+.landingHero {
+  display: grid;
+  gap: 16px;
+  justify-items: start;
+}
+
+.landingHero h1 {
+  max-width: 15ch;
+  font-size: clamp(2.1rem, 5.4vw, 3.4rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.landingHero p {
+  margin: 0;
+  max-width: 58ch;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+
+.endpointBlock {
+  display: grid;
+  gap: 8px;
+  width: min(640px, 100%);
+  margin-top: 8px;
+}
+
+.endpointRow {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--panel);
+  padding: 13px 16px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.endpointRow:hover {
+  border-color: rgba(0, 213, 87, 0.55);
+  background: var(--panel-2);
+}
+
+.endpointLabel {
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.endpointUrl {
+  overflow: hidden;
+  color: var(--green);
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.endpointCopy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.endpointCopy.copied {
+  color: var(--green);
+}
+
+.endpointNote {
+  color: var(--muted);
+  padding-left: 2px;
+}
+
+.statsHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.statsHeader .ledger {
+  font-size: 0.78rem;
+}
+
+.liveDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.liveDot.on {
+  background: var(--green);
+  box-shadow: 0 0 0 0 rgba(0, 213, 87, 0.5);
+  animation: livePulse 2.4s ease-out infinite;
+}
+
+@keyframes livePulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 213, 87, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 9px rgba(0, 213, 87, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 213, 87, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liveDot.on {
+    animation: none;
+  }
+}
+
+.statTiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 760px) {
+  .statTiles {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+}
+
+.statTile {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 14px;
+}
+
+.statTile strong {
+  font-size: 1.2rem;
+  overflow-wrap: anywhere;
+}
+
+.statTile strong a {
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px solid var(--green);
+}
+
+.statTile small {
+  color: var(--muted);
+}
+
+.linkCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.linkCard {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--panel);
+  padding: 18px;
+  text-decoration: none;
+}
+
+.linkCard:hover {
+  border-color: rgba(0, 213, 87, 0.55);
+  background: var(--panel-2);
+}
+
+.linkCard strong {
+  font-size: 1.1rem;
+}
+
+.linkCardUrl {
+  color: var(--green);
+  font-size: 0.9rem;
+}
+
+.soonTag {
+  margin-left: 8px;
+  border: 1px solid rgba(247, 201, 72, 0.5);
+  border-radius: 999px;
+  color: var(--warn);
+  font-style: normal;
+  font-size: 0.68rem;
+  padding: 1px 8px;
+  text-transform: uppercase;
+}
+
+.landingSteps {
+  display: grid;
+  gap: 14px;
+}
+
+.landingSteps ol {
+  margin: 0;
+  display: grid;
+  gap: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.landingSteps li {
+  display: grid;
+  grid-template-columns: 44px 140px 1fr;
+  align-items: baseline;
+  gap: 14px;
+  border-top: 1px solid var(--border);
+  padding: 14px 0;
+  counter-increment: step;
+}
+
+.landingSteps li::before {
+  content: counter(step, decimal-leading-zero);
+  color: var(--green);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+
+.landingSteps li span {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.landingFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  padding: 20px;
+  font-size: 0.92rem;
+}
+
+.linkButton {
+  border: none;
+  background: none;
+  color: var(--green);
+  cursor: pointer;
+  font-size: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  .endpointRow {
+    grid-template-columns: 1fr auto;
+  }
+
+  .endpointLabel {
+    display: none;
+  }
+
+  .landingSteps li {
+    grid-template-columns: 44px 1fr;
+  }
+
+  .landingSteps li span {
+    grid-column: 2;
+  }
+}
+
 .loading {
   display: grid;
   min-height: 100vh;
