@@ -393,6 +393,21 @@ function Landing({ onLogin }: { onLogin: (session: Session) => void }) {
           </a>
         </section>
 
+        <section className="landingFiles">
+          <span className="ledger">Network files</span>
+          <div className="fileLinks">
+            <a className="fileLink mono" href="/genesis.json" target="_blank" rel="noreferrer">
+              <FileJson size={16} />
+              genesis.json
+            </a>
+            <a className="fileLink mono" href="/config.json" target="_blank" rel="noreferrer">
+              <FileJson size={16} />
+              config.json
+            </a>
+          </div>
+          <small>Published with each release — use them to run your own node against this network.</small>
+        </section>
+
         <section className="landingSteps">
           <span className="ledger">Using the testnet</span>
           <ol>
