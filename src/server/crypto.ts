@@ -2,11 +2,27 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt as sc
 import { promisify } from "node:util";
 
 const scrypt = promisify(scryptCallback);
-const SECRET = process.env.APP_SECRET ?? "dev-secret-change-me";
+const DEV_SECRET = "dev-secret-change-me";
+const MIN_SECRET_LENGTH = 16;
 
-if (!process.env.APP_SECRET && process.env.NODE_ENV === "production") {
+function resolveSecret(): string {
+  const configured = process.env.APP_SECRET;
+  if (configured && configured.length >= MIN_SECRET_LENGTH) return configured;
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      configured
+        ? `APP_SECRET must be at least ${MIN_SECRET_LENGTH} characters. Generate one with: openssl rand -hex 32`
+        : "APP_SECRET is not set. Refusing to start in production with the development secret. Generate one with: openssl rand -hex 32"
+    );
+  }
+
+  if (configured) return configured;
   console.warn("APP_SECRET is not set; using the development secret. Set APP_SECRET before using this outside local testing.");
+  return DEV_SECRET;
 }
+
+const SECRET = resolveSecret();
 
 function keyFromSecret(): Buffer {
   return createHash("sha256").update(SECRET).digest();

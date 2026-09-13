@@ -4,13 +4,18 @@ import { createECDH } from "node:crypto";
 import path from "node:path";
 import { z } from "zod";
 import { clearSessionCookie, login, logout, requireAuth, sessionTokenFromRequest, setSessionCookie, type AuthedRequest } from "./auth.js";
-import { createAccount, resetAccountPassword } from "./accounts.js";
+import { createAccount, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, resetAccountPassword } from "./accounts.js";
 import { decryptText, encryptText, randomId, sha256 } from "./crypto.js";
 import { buildGenesis, buildNodeConfig, readiness, toPublicPillar } from "./genesis.js";
 import { buildPillarPackage, buildSeedNodePackage, buildSporkPackage } from "./packages.js";
 import { enodeFromPublicKey, multiaddrFromEnode, multiaddrFromPublicKey } from "./libp2p.js";
-import { probeSeedNode, validateSeedNodeIp } from "./seeders.js";
-import { readState, updateState } from "./storage.js";
+import { bootstrapInstallScript } from "./bootstrap-script.js";
+import { resolveGitRef } from "./git-refs.js";
+import { publishInputsKey, settingsSnapshot } from "./settings.js";
+import { AttemptLimiter } from "./rate-limit.js";
+import { checkCommit, checkGitRef, checkRepoUrl, loadRepoPolicy, redactUrl, releasePolicyErrors } from "./repo-policy.js";
+import { isPublicIp, probeSeedNode, validateSeedNodeIp } from "./seeders.js";
+import { DEFAULT_DEPLOYMENT_REPO, DEFAULT_GO_ZENON_REPO, readState, updateState } from "./storage.js";
 import { createWallet, toStoredWallet } from "./wallets.js";
 import type {
   AppState,
@@ -32,11 +37,69 @@ const PUBLIC_GENESIS_PATH = "/genesis.json";
 const PUBLIC_CONFIG_PATH = "/config.json";
 const PUBLIC_NODE_PLAN_PATH = "/node-plan.json";
 const NODE_STATUS_HISTORY_LIMIT = 24 * 60;
+// Nodes report once a minute. Samples that arrive faster than this only refresh `latest`, so a
+// misbehaving token holder cannot grow the on-disk history faster than a well-behaved agent.
+const NODE_STATUS_HISTORY_MIN_INTERVAL_MS = 50_000;
+// Optional fixed public origin (e.g. https://testnet.example.com) used in generated scripts and
+// manifests instead of trusting Host / X-Forwarded-* request headers.
+const PUBLIC_URL = normalizePublicUrl(process.env.PUBLIC_URL);
+// Which upstream proxies may set X-Forwarded-* (express "trust proxy" setting). Defaults to
+// loopback only; the compose stacks set TRUST_PROXY=uniquelocal because their Caddy reaches the app
+// over a private Docker network. Anything in the trusted range can forge forwarded addresses, so
+// keep it as narrow as the deployment allows.
+const TRUST_PROXY = parseTrustProxy(process.env.TRUST_PROXY);
+
+// Which repositories operator nodes may be told to clone and execute as root.
+const REPO_POLICY = loadRepoPolicy(process.env, [DEFAULT_GO_ZENON_REPO, DEFAULT_DEPLOYMENT_REPO]);
+
+// Login attempts are counted per (account, client address) so a remote guesser cannot lock the
+// real admin out from another address, plus a looser per-address cap and a bound on how many
+// password checks may run at once (each one is a deliberately expensive scrypt).
+const LOGIN_WINDOW_MS = 15 * 60_000;
+const loginLimiterByAccountAndAddress = new AttemptLimiter({ maxAttempts: 10, windowMs: LOGIN_WINDOW_MS });
+const loginLimiterByAddress = new AttemptLimiter({ maxAttempts: 50, windowMs: LOGIN_WINDOW_MS });
+const MAX_CONCURRENT_LOGINS = 8;
+let loginsInFlight = 0;
 
 const loginSchema = z.object({
-  username: z.string().min(1),
-  password: z.string().min(1)
+  username: z.string().min(1).max(200),
+  password: z.string().min(1).max(PASSWORD_MAX_LENGTH)
 });
+
+// Values that end up as arguments to `git clone` and the deployment script on operator nodes.
+const repoUrlSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(300)
+  .superRefine((value, context) => {
+    const check = checkRepoUrl(value, REPO_POLICY);
+    if (!check.ok) context.addIssue({ code: z.ZodIssueCode.custom, message: check.reason });
+  });
+const gitRefSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(160)
+  .superRefine((value, context) => {
+    const check = checkGitRef(value);
+    if (!check.ok) context.addIssue({ code: z.ZodIssueCode.custom, message: check.reason });
+  });
+const gitCommitSchema = z
+  .string()
+  .trim()
+  .transform((value) => value.toLowerCase())
+  .superRefine((value, context) => {
+    const check = checkCommit(value);
+    if (!check.ok) context.addIssue({ code: z.ZodIssueCode.custom, message: check.reason });
+  });
+const optionalCommitSchema = z
+  .string()
+  .trim()
+  .max(80)
+  .optional()
+  .transform((value) => value || undefined)
+  .pipe(gitCommitSchema.optional());
 
 const nodeNameSchema = z
   .string()
@@ -65,7 +128,10 @@ const usernameSchema = z
   .max(40)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "Use letters, numbers, dots, underscores, or hyphens");
 
-const passwordSchema = z.string().min(8, "Password must be at least 8 characters").max(200);
+const passwordSchema = z
+  .string()
+  .min(PASSWORD_MIN_LENGTH, `Password must be at least ${PASSWORD_MIN_LENGTH} characters`)
+  .max(PASSWORD_MAX_LENGTH);
 
 const accountCreateSchema = z.object({
   username: usernameSchema,
@@ -84,11 +150,12 @@ const settingsSchema = z.object({
   minPillars: z.number().int().min(1).max(100),
   genesisTimestampSec: z.number().int().positive(),
   releaseApplyAtSec: z.number().int().positive().optional(),
-  goZenonRepo: z.string().trim().min(1).max(300),
-  goZenonRef: z.string().trim().min(1).max(160),
-  goZenonCommit: z.string().trim().max(80).optional(),
-  deploymentRepo: z.string().trim().min(1).max(300),
-  deploymentRef: z.string().trim().min(1).max(160),
+  goZenonRepo: repoUrlSchema,
+  goZenonRef: gitRefSchema,
+  goZenonCommit: optionalCommitSchema,
+  deploymentRepo: repoUrlSchema,
+  deploymentRef: gitRefSchema,
+  deploymentCommit: optionalCommitSchema,
   wipeDataOnPublish: z.boolean().default(false),
   seeders: z.array(z.string().trim().min(1)).max(100),
   bootstrapPeers: z.array(z.string().trim().min(1)).max(100).optional(),
@@ -115,7 +182,11 @@ const settingsSchema = z.object({
 });
 
 const seedNodeProbeSchema = z.object({
-  ip: z.string().trim().refine(validateSeedNodeIp, "Seed node must be an IP address"),
+  ip: z
+    .string()
+    .trim()
+    .refine(validateSeedNodeIp, "Seed node must be an IP address")
+    .refine(isPublicIp, "Seed node must have a public IP address; loopback, private, and link-local addresses cannot be probed"),
   rpcPort: z.number().int().min(1).max(65535).default(35997),
   p2pPort: z.number().int().min(1).max(65535).default(35995)
 });
@@ -153,7 +224,8 @@ const nodeStatusReportSchema = z.object({
       installedRef: optionalNullableText(256),
       installedCommit: optionalNullableText(256),
       genesisSha256: optionalNullableText(256),
-      configSha256: optionalNullableText(256)
+      configSha256: optionalNullableText(256),
+      lastError: optionalNullableText(512)
     })
     .optional(),
   sync: z
@@ -377,6 +449,7 @@ async function createSeedNode(userId: string, nodeName: string, publicIp: string
 function sendDownload(response: express.Response, filename: string, contentType: string, body: Buffer | string): void {
   response.setHeader("Content-Type", contentType);
   response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  response.setHeader("Cache-Control", "private, no-store");
   response.send(body);
 }
 
@@ -411,14 +484,6 @@ function publishedInfo(published?: PublishedArtifacts): PublishedArtifactsInfo |
   };
 }
 
-function cloneJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function settingsSnapshot(settings: NetworkSettings): NetworkSettingsSnapshot {
-  const { sporkWallet: _sporkWallet, ...snapshot } = settings;
-  return cloneJson(snapshot);
-}
 
 function genesisSettingsKey(settings: NetworkSettings): string {
   return JSON.stringify({
@@ -434,11 +499,42 @@ function genesisSettingsKey(settings: NetworkSettings): string {
   });
 }
 
+function normalizePublicUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error(`PUBLIC_URL is not a valid URL: ${trimmed}`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("PUBLIC_URL must use http or https");
+  return url.origin;
+}
+
+function parseTrustProxy(value: string | undefined): boolean | string | number {
+  const trimmed = value?.trim();
+  if (!trimmed) return "loopback";
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (/^\d+$/.test(trimmed)) return Number(trimmed);
+  return trimmed;
+}
+
+// Host header values are interpolated into generated shell scripts, so only accept the characters
+// a hostname, IPv6 literal, or port can contain.
+const HOST_HEADER_PATTERN = /^[A-Za-z0-9.\-\[\]:]{1,253}$/;
+
 function requestOrigin(request: express.Request): string {
-  const forwardedProto = request.get("x-forwarded-proto")?.split(",")[0]?.trim();
-  const forwardedHost = request.get("x-forwarded-host")?.split(",")[0]?.trim();
-  const proto = forwardedProto || request.protocol;
-  const host = forwardedHost || request.get("host") || `127.0.0.1:${PORT}`;
+  if (PUBLIC_URL) return PUBLIC_URL;
+  // Express compiles "trust proxy" into a per-peer predicate; only honor X-Forwarded-Host when the
+  // immediate peer is a trusted proxy, exactly as request.protocol does for X-Forwarded-Proto.
+  const trustProxy = request.app.get("trust proxy fn") as ((address: string | undefined, hop: number) => boolean) | undefined;
+  const peerTrusted = Boolean(trustProxy?.(request.socket.remoteAddress, 0));
+  const proto = request.protocol === "https" ? "https" : "http";
+  const forwardedHost = peerTrusted ? request.get("x-forwarded-host")?.split(",")[0]?.trim() : undefined;
+  const host = forwardedHost || request.get("host") || "";
+  if (!HOST_HEADER_PATTERN.test(host)) return `http://127.0.0.1:${PORT}`;
   return `${proto}://${host}`;
 }
 
@@ -493,8 +589,47 @@ function releaseTarget(settings: NetworkSettings | NetworkSettingsSnapshot) {
     },
     deployment: {
       repoUrl: settings.deploymentRepo,
-      ref: settings.deploymentRef
+      ref: settings.deploymentRef,
+      commit: settings.deploymentCommit || undefined
     }
+  };
+}
+
+/**
+ * Policy violations in an already-published node plan. Published plans must carry both commit
+ * pins; legacy plans that predate pinning are withheld from nodes until a new release is published.
+ */
+function nodePlanPolicyErrors(nodePlan: PublishedArtifacts["nodePlan"]): string[] {
+  if (!nodePlan) return [];
+  return releasePolicyErrors(
+    {
+      goZenonRepo: nodePlan.goZenon.repoUrl,
+      goZenonRef: nodePlan.goZenon.ref,
+      goZenonCommit: nodePlan.goZenon.commit,
+      deploymentRepo: nodePlan.deployment.repoUrl,
+      deploymentRef: nodePlan.deployment.ref,
+      deploymentCommit: nodePlan.deployment.commit
+    },
+    REPO_POLICY,
+    { requirePins: true }
+  );
+}
+
+class PublishError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
+function redactedNodePlan<T extends PublishedArtifacts["nodePlan"]>(nodePlan: T): T {
+  if (!nodePlan) return nodePlan;
+  return {
+    ...nodePlan,
+    goZenon: { ...nodePlan.goZenon, repoUrl: redactUrl(nodePlan.goZenon.repoUrl) },
+    deployment: { ...nodePlan.deployment, repoUrl: redactUrl(nodePlan.deployment.repoUrl) }
   };
 }
 
@@ -587,376 +722,19 @@ async function withBootstrapNode(
   response.status(401).json({ error: "Invalid bootstrap token" });
 }
 
-function bootstrapInstallScript(origin: string): string {
-  return `#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ "$EUID" -ne 0 ]]; then
-  echo "Run this script as root, usually via sudo." >&2
-  exit 1
-fi
-
-: "\${ZNN_BOOTSTRAP_TOKEN:?Set ZNN_BOOTSTRAP_TOKEN to the node bootstrap token from the testnet builder.}"
-
-BASE_URL="\${ZNN_TESTNET_URL:-${origin}}"
-ZNN_DIR="\${ZNN_DIR:-/root/.znn}"
-DEPLOYMENT_DIR="\${ZNN_DEPLOYMENT_DIR:-/opt/zenon-deployment}"
-DEPLOYMENT_MIN_CPU_CORES="\${ZNN_DEPLOYMENT_MIN_CPU_CORES:-2}"
-SERVICE_NAME="\${ZNN_SERVICE_NAME:-go-zenon}"
-RPC_URL="\${ZNN_RPC_URL:-http://127.0.0.1:35997}"
-BOOTSTRAP_TRACE="\${ZNN_BOOTSTRAP_TRACE:-0}"
-
-if ! [[ "$DEPLOYMENT_MIN_CPU_CORES" =~ ^[0-9]+$ ]] || (( DEPLOYMENT_MIN_CPU_CORES < 1 )); then
-  DEPLOYMENT_MIN_CPU_CORES=2
-fi
-
-if command -v apt-get >/dev/null 2>&1; then
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git jq util-linux
-fi
-
-cat > /usr/local/bin/znn-testnet-agent <<'AGENT'
-#!/usr/bin/env bash
-set -euo pipefail
-
-ENV_FILE="\${ZNN_AGENT_ENV_FILE:-/etc/cron.d/znn-testnet-agent}"
-if [[ -z "\${ZNN_BOOTSTRAP_TOKEN:-}" && -r "$ENV_FILE" ]]; then
-  while IFS='=' read -r key value; do
-    case "$key" in
-      ZNN_BOOTSTRAP_TOKEN|ZNN_TESTNET_URL|ZNN_DIR|ZNN_DEPLOYMENT_DIR|ZNN_DEPLOYMENT_MIN_CPU_CORES|ZNN_RPC_URL|ZNN_SERVICE_NAME|ZNN_AGENT_STATE_DIR|ZNN_BOOTSTRAP_TRACE)
-        [[ -n "$value" ]] && export "$key=$value"
-        ;;
-    esac
-  done < <(grep -E '^(ZNN_BOOTSTRAP_TOKEN|ZNN_TESTNET_URL|ZNN_DIR|ZNN_DEPLOYMENT_DIR|ZNN_DEPLOYMENT_MIN_CPU_CORES|ZNN_RPC_URL|ZNN_SERVICE_NAME|ZNN_AGENT_STATE_DIR|ZNN_BOOTSTRAP_TRACE)=' "$ENV_FILE" || true)
-fi
-
-: "\${ZNN_BOOTSTRAP_TOKEN:?Missing ZNN_BOOTSTRAP_TOKEN.}"
-
-BASE_URL="\${ZNN_TESTNET_URL:-${origin}}"
-ZNN_DIR="\${ZNN_DIR:-/root/.znn}"
-DEPLOYMENT_DIR="\${ZNN_DEPLOYMENT_DIR:-/opt/zenon-deployment}"
-DEPLOYMENT_MIN_CPU_CORES="\${ZNN_DEPLOYMENT_MIN_CPU_CORES:-2}"
-RPC_URL="\${ZNN_RPC_URL:-http://127.0.0.1:35997}"
-SERVICE_NAME="\${ZNN_SERVICE_NAME:-go-zenon}"
-STATE_DIR="\${ZNN_AGENT_STATE_DIR:-/var/lib/znn-testnet-agent}"
-BOOTSTRAP_TRACE="\${ZNN_BOOTSTRAP_TRACE:-0}"
-INSTALL_STATE_FILE="$STATE_DIR/install-state.json"
-STATUS_FILE="$STATE_DIR/status.json"
-
-mkdir -p "$STATE_DIR"
-
-if ! [[ "$DEPLOYMENT_MIN_CPU_CORES" =~ ^[0-9]+$ ]] || (( DEPLOYMENT_MIN_CPU_CORES < 1 )); then
-  DEPLOYMENT_MIN_CPU_CORES=2
-fi
-
-auth_get() {
-  curl -fsSL -H "Authorization: Bearer $ZNN_BOOTSTRAP_TOKEN" "$1"
-}
-
-try_auth_get() {
-  local tmp code
-  tmp="$(mktemp)"
-  code="$(curl -sS -H "Authorization: Bearer $ZNN_BOOTSTRAP_TOKEN" -w "%{http_code}" -o "$tmp" "$1" || true)"
-  if [[ "$code" == "200" ]]; then
-    cat "$tmp"
-    rm -f "$tmp"
-    return 0
-  fi
-  rm -f "$tmp"
-  return 1
-}
-
-rpc() {
-  curl -fs --max-time 5 -H "Content-Type: application/json" \\
-    -d "{\\"jsonrpc\\":\\"2.0\\",\\"id\\":1,\\"method\\":\\"$1\\",\\"params\\":[]}" \\
-    "$RPC_URL" 2>/dev/null | jq -c '.result // {}'
-}
-
-wipe_data_dir() {
-  local item base
-  mkdir -p "$ZNN_DIR"
-  shopt -s dotglob nullglob
-  for item in "$ZNN_DIR"/*; do
-    base="$(basename "$item")"
-    case "$base" in
-      wallet|genesis.json|config.json|network-private-key)
-        continue
-        ;;
-    esac
-    rm -rf -- "$item"
-  done
-  shopt -u dotglob nullglob
-}
-
-patch_deployment_preflight() {
-  local preflight_file="$DEPLOYMENT_DIR/lib/preflight.sh"
-  [[ -f "$preflight_file" ]] || return 0
-
-  sed -i -E "s/cores < [0-9]+/cores < $DEPLOYMENT_MIN_CPU_CORES/" "$preflight_file"
-  sed -i -E "s/Minimum [0-9]+ required\\./Minimum $DEPLOYMENT_MIN_CPU_CORES required./" "$preflight_file"
-  sed -i -E '/mem_total_gb < [0-9]+/,/fi/ s/error_log "Total RAM \\$\\{mem_total_gb\\}GiB detected\\. Minimum [0-9]+GiB required\\."/warn_log "Total RAM \\\${mem_total_gb}GiB detected. 4GiB recommended for go-zenon builds."/' "$preflight_file"
-  sed -i -E '/mem_total_gb < [0-9]+/,/fi/ s/^[[:space:]]*return 1[[:space:]]*$/:/' "$preflight_file"
-  echo "Deployment pre-flight patch:"
-  echo "  CPU minimum: $DEPLOYMENT_MIN_CPU_CORES core(s)"
-  echo "  RAM check: warning only; 4GiB remains recommended"
-  if [[ "$BOOTSTRAP_TRACE" == "1" || "$BOOTSTRAP_TRACE" == "true" ]]; then
-    echo "Deployment pre-flight patch trace:"
-    grep -E 'cores <|Minimum [0-9]+ required|mem_total_gb <|Total RAM|4GiB recommended' "$preflight_file" | sed 's/^/  /' || true
-  fi
-}
-
-install_release() {
-  local manifest="$1"
-  local event_id node_type go_repo go_ref go_commit deployment_repo deployment_ref genesis_url config_url producer_url producer_password_url network_private_key_url wipe_data apply_at desired_key installed_key binary_key installed_binary_key binary_missing artifacts_ready
-
-  event_id="$(printf '%s' "$manifest" | jq -r '.eventId')"
-  node_type="$(printf '%s' "$manifest" | jq -r '.nodeType // "pillar"')"
-  go_repo="$(printf '%s' "$manifest" | jq -r '.goZenon.repoUrl')"
-  go_ref="$(printf '%s' "$manifest" | jq -r '.goZenon.ref')"
-  go_commit="$(printf '%s' "$manifest" | jq -r '.goZenon.commit // empty')"
-  deployment_repo="$(printf '%s' "$manifest" | jq -r '.deployment.repoUrl')"
-  deployment_ref="$(printf '%s' "$manifest" | jq -r '.deployment.ref')"
-  wipe_data="$(printf '%s' "$manifest" | jq -r '.actions.wipeData // false')"
-  apply_at="$(printf '%s' "$manifest" | jq -r '.actions.applyAt // empty')"
-  genesis_url="$(printf '%s' "$manifest" | jq -r '.genesisUrl')"
-  config_url="$(printf '%s' "$manifest" | jq -r '.configUrl')"
-  producer_url="$(printf '%s' "$manifest" | jq -r '.producerKeyFileUrl // empty')"
-  producer_password_url="$(printf '%s' "$manifest" | jq -r '.producerPasswordUrl // empty')"
-  network_private_key_url="$(printf '%s' "$manifest" | jq -r '.networkPrivateKeyUrl // empty')"
-  desired_key="$(printf '%s' "$manifest" | jq -r '[.eventId, (.nodeType // "pillar"), .goZenon.repoUrl, .goZenon.ref, (.goZenon.commit // ""), .deployment.repoUrl, .deployment.ref, (.actions.wipeData // false), (.actions.applyAt // "")] | @tsv')"
-  binary_key="$(printf '%s' "$manifest" | jq -r '[.goZenon.repoUrl, .goZenon.ref, (.goZenon.commit // ""), .deployment.repoUrl, .deployment.ref] | @tsv')"
-  installed_key="$(jq -r '.desiredKey // empty' "$INSTALL_STATE_FILE" 2>/dev/null || true)"
-  installed_binary_key="$(jq -r '.binaryKey // empty' "$INSTALL_STATE_FILE" 2>/dev/null || true)"
-  binary_missing=false
-  if ! command -v znnd >/dev/null 2>&1; then
-    binary_missing=true
-  fi
-
-  artifacts_ready=false
-  if [[ -s "$ZNN_DIR/genesis.json" && -s "$ZNN_DIR/config.json" ]]; then
-    if [[ "$node_type" == "seed" && -s "$ZNN_DIR/network-private-key" ]]; then
-      artifacts_ready=true
-    elif [[ "$node_type" != "seed" && -s "$ZNN_DIR/wallet/producer.json" && -s "$ZNN_DIR/wallet/producer-password.txt" ]]; then
-      artifacts_ready=true
-    fi
-  fi
-
-  if [[ "$desired_key" == "$installed_key" && "$artifacts_ready" == "true" ]]; then
-    return 0
-  fi
-
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-  fi
-
-  if [[ "$binary_key" != "$installed_binary_key" || "$binary_missing" == "true" ]]; then
-    rm -rf "$DEPLOYMENT_DIR"
-    git clone --depth 1 --branch "$deployment_ref" "$deployment_repo" "$DEPLOYMENT_DIR"
-    chmod +x "$DEPLOYMENT_DIR/zenon.sh"
-    patch_deployment_preflight
-
-    cd "$DEPLOYMENT_DIR"
-    if ! ./zenon.sh --deploy zenon "$go_repo" "$go_ref"; then
-      echo "zenon.sh deployment failed. Last deployment log lines:" >&2
-      tail -120 "$DEPLOYMENT_DIR/.znnsh.log" >&2 2>/dev/null || true
-      return 1
-    fi
-
-    if command -v systemctl >/dev/null 2>&1; then
-      systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-    fi
-  fi
-
-  if [[ "$wipe_data" == "true" ]]; then
-    wipe_data_dir
-  fi
-
-  mkdir -p "$ZNN_DIR/wallet"
-  auth_get "$genesis_url" > "$ZNN_DIR/genesis.json"
-  auth_get "$config_url" > "$ZNN_DIR/config.json"
-  if [[ -n "$producer_url" ]]; then
-    auth_get "$producer_url" > "$ZNN_DIR/wallet/producer.json"
-  fi
-  if [[ -n "$producer_password_url" ]]; then
-    auth_get "$producer_password_url" > "$ZNN_DIR/wallet/producer-password.txt"
-  fi
-  if [[ -n "$network_private_key_url" ]]; then
-    auth_get "$network_private_key_url" > "$ZNN_DIR/network-private-key"
-  fi
-
-  chmod 700 "$ZNN_DIR" "$ZNN_DIR/wallet"
-  chmod 600 "$ZNN_DIR/genesis.json" "$ZNN_DIR/config.json"
-  [[ -f "$ZNN_DIR/wallet/producer.json" ]] && chmod 600 "$ZNN_DIR/wallet/producer.json"
-  [[ -f "$ZNN_DIR/wallet/producer-password.txt" ]] && chmod 600 "$ZNN_DIR/wallet/producer-password.txt"
-  [[ -f "$ZNN_DIR/network-private-key" ]] && chmod 600 "$ZNN_DIR/network-private-key"
-
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl restart "$SERVICE_NAME"
-  fi
-
-  jq -n \\
-    --arg desiredKey "$desired_key" \\
-    --arg binaryKey "$binary_key" \\
-    --arg eventId "$event_id" \\
-    --arg installedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
-    --arg goRepo "$go_repo" \\
-    --arg goRef "$go_ref" \\
-    --arg goCommit "$go_commit" \\
-    --arg deploymentRepo "$deployment_repo" \\
-    --arg deploymentRef "$deployment_ref" \\
-    --arg nodeType "$node_type" \\
-    --arg applyAt "$apply_at" \\
-    --argjson wipeData "$wipe_data" \\
-    '{
-      desiredKey: $desiredKey,
-      binaryKey: $binaryKey,
-      eventId: $eventId,
-      installedAt: $installedAt,
-      nodeType: $nodeType,
-      goZenon: { repoUrl: $goRepo, ref: $goRef, commit: $goCommit },
-      deployment: { repoUrl: $deploymentRepo, ref: $deploymentRef },
-      actions: ({ wipeData: $wipeData } + (if $applyAt == "" then {} else { applyAt: $applyAt } end))
-    }' > "$INSTALL_STATE_FILE"
-}
-
-report_status() {
-  local manifest="\${1:-}"
-  local waiting="\${2:-false}"
-  local event_id go_repo go_ref go_commit sync_json network_json process_json service_active logs error_count warn_count recent_json payload
-
-  if [[ -n "$manifest" ]]; then
-    event_id="$(printf '%s' "$manifest" | jq -r '.eventId')"
-    go_repo="$(printf '%s' "$manifest" | jq -r '.goZenon.repoUrl')"
-    go_ref="$(printf '%s' "$manifest" | jq -r '.goZenon.ref')"
-    go_commit="$(printf '%s' "$manifest" | jq -r '.goZenon.commit // empty')"
-  else
-    event_id="waiting-for-release"
-    go_repo=""
-    go_ref=""
-    go_commit=""
-  fi
-
-  sync_json="$(rpc stats.syncInfo || echo '{}')"
-  network_json="$(rpc stats.networkInfo || echo '{}')"
-  process_json="$(rpc stats.processInfo || echo '{}')"
-  service_active=false
-  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$SERVICE_NAME"; then
-    service_active=true
-  fi
-
-  logs="$(journalctl -u "$SERVICE_NAME" --since '1 minute ago' --no-pager 2>/dev/null | grep -Eai 'error|warn|panic|fatal|failed|exception' | tail -20 || true)"
-  error_count="$(printf '%s\\n' "$logs" | grep -Eai 'error|panic|fatal|failed|exception' | grep -c . || true)"
-  warn_count="$(printf '%s\\n' "$logs" | grep -Eai 'warn' | grep -c . || true)"
-  recent_json="$(printf '%s\\n' "$logs" | jq -R . | jq -s .)"
-
-  payload="$(jq -n \\
-    --arg eventId "$event_id" \\
-    --arg reportedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
-    --arg hostname "$(hostname)" \\
-    --arg goRepo "$go_repo" \\
-    --arg goRef "$go_ref" \\
-    --arg goCommit "$go_commit" \\
-    --argjson serviceActive "$service_active" \\
-    --argjson waiting "$waiting" \\
-    --argjson sync "$sync_json" \\
-    --argjson network "$network_json" \\
-    --argjson process "$process_json" \\
-    --argjson errors "$error_count" \\
-    --argjson warnings "$warn_count" \\
-    --argjson recent "$recent_json" \\
-    '{
-      eventId: $eventId,
-      reportedAt: $reportedAt,
-      node: {
-        hostname: $hostname,
-        serviceActive: $serviceActive,
-        waitingForRelease: $waiting,
-        installedRepo: $goRepo,
-        installedRef: $goRef,
-        installedCommit: $goCommit
-      },
-      sync: ({
-      } + (if ($sync.state // null) == null then {} else { state: $sync.state } end)
-        + (if ($sync.currentHeight // null) == null then {} else { currentHeight: $sync.currentHeight } end)
-        + (if ($sync.targetHeight // null) == null then {} else { targetHeight: $sync.targetHeight } end)),
-      network: ({
-        peerCount: (($network.peers // []) | length)
-      } + (if ($network.self.publicKey // null) == null then {} else { selfPublicKey: $network.self.publicKey } end)
-        + (if ($network.self.ip // null) == null then {} else { selfIp: $network.self.ip } end)
-        + {
-          peers: (($network.peers // []) | map(
-            {}
-            + (if (.publicKey // null) == null then {} else { publicKey: .publicKey } end)
-            + (if (.ip // null) == null then {} else { ip: .ip } end)
-            + (if (.name // null) == null then {} else { name: .name } end)
-            + (if (.version // null) == null then {} else { version: .version } end)
-          ) | .[0:20])
-        }),
-      process: ({
-      } + (if ($process.version // null) == null then {} else { version: $process.version } end)
-        + (if ($process.commit // null) == null then {} else { commit: $process.commit } end)),
-      logs: {
-        errorCountLastMinute: $errors,
-        warningCountLastMinute: $warnings,
-        recent: $recent
-      }
-    }')"
-
-  curl -fsS -X POST "$BASE_URL/api/bootstrap/status" \\
-    -H "Authorization: Bearer $ZNN_BOOTSTRAP_TOKEN" \\
-    -H "Content-Type: application/json" \\
-    -d "$payload" >/dev/null || true
-
-  printf '%s\\n' "$payload" > "$STATUS_FILE"
-}
-
-manifest="$(try_auth_get "$BASE_URL/api/bootstrap/manifest" || true)"
-if [[ -z "$manifest" ]]; then
-  report_status "" true
-  echo "No published release is available yet. Waiting for Publish Release."
-  exit 0
-fi
-
-apply_at="$(printf '%s' "$manifest" | jq -r '.actions.applyAt // empty')"
-if [[ -n "$apply_at" ]]; then
-  apply_at_epoch="$(date -u -d "$apply_at" +%s 2>/dev/null || echo 0)"
-  now_epoch="$(date -u +%s)"
-  if [[ "$apply_at_epoch" =~ ^[0-9]+$ ]] && (( apply_at_epoch > now_epoch )); then
-    report_status "$manifest" true
-    echo "Published release applies at $apply_at. Waiting."
-    exit 0
-  fi
-fi
-
-if ! install_release "$manifest"; then
-  report_status "$manifest" false
-  exit 1
-fi
-report_status "$manifest" false
-AGENT
-
-chmod 700 /usr/local/bin/znn-testnet-agent
-
-cat > /etc/cron.d/znn-testnet-agent <<EOF
-ZNN_BOOTSTRAP_TOKEN=$ZNN_BOOTSTRAP_TOKEN
-ZNN_TESTNET_URL=$BASE_URL
-ZNN_DEPLOYMENT_MIN_CPU_CORES=$DEPLOYMENT_MIN_CPU_CORES
-ZNN_RPC_URL=$RPC_URL
-ZNN_SERVICE_NAME=$SERVICE_NAME
-ZNN_BOOTSTRAP_TRACE=$BOOTSTRAP_TRACE
-*/1 * * * * root flock -n /var/lock/znn-testnet-agent.lock /usr/local/bin/znn-testnet-agent
-EOF
-chmod 600 /etc/cron.d/znn-testnet-agent
-
-flock -n /var/lock/znn-testnet-agent.lock /usr/local/bin/znn-testnet-agent || true
-
-echo "Zenon testnet bootstrap installed. The agent will apply the release after Publish Release."
-`;
-}
 
 function historySample(report: NodeStatusReport): NodeStatusReport {
+  // History only needs the numeric time series; drop per-peer detail and log lines so the state
+  // file stays small regardless of what a node reports.
   return {
     ...report,
+    network: report.network
+      ? {
+          peerCount: report.network.peerCount,
+          selfPublicKey: report.network.selfPublicKey,
+          selfIp: report.network.selfIp
+        }
+      : undefined,
     logs: report.logs
       ? {
           errorCountLastMinute: report.logs.errorCountLastMinute,
@@ -993,7 +771,10 @@ async function receiveNodeStatus(request: express.Request, response: express.Res
         remoteAddress: request.ip
       };
 
-      const history = [...(target.nodeStatus?.history ?? []), historySample(latest)].slice(-NODE_STATUS_HISTORY_LIMIT);
+      const previousHistory = target.nodeStatus?.history ?? [];
+      const lastSampleAt = previousHistory.at(-1)?.receivedAt;
+      const appendSample = !lastSampleAt || Date.now() - new Date(lastSampleAt).getTime() >= NODE_STATUS_HISTORY_MIN_INTERVAL_MS;
+      const history = (appendSample ? [...previousHistory, historySample(latest)] : previousHistory).slice(-NODE_STATUS_HISTORY_LIMIT);
       target.nodeStatus = {
         latest,
         history
@@ -1013,12 +794,38 @@ async function receiveNodeStatus(request: express.Request, response: express.Res
   }
 }
 
+async function warnAboutStoredSettings(): Promise<void> {
+  const state = await readState();
+  for (const reason of releasePolicyErrors(state.settings, REPO_POLICY)) {
+    console.warn(`Stored release settings violate the repository policy (${reason}). Publishing is blocked until they are fixed.`);
+  }
+  if (state.publishedArtifacts?.nodePlan && nodePlanPolicyErrors(state.publishedArtifacts.nodePlan).length) {
+    console.warn("The currently published release violates the repository policy; nodes will not receive it until a compliant release is published.");
+  }
+  if (!PUBLIC_URL && process.env.NODE_ENV === "production") {
+    console.warn("PUBLIC_URL is not set; generated bootstrap scripts will derive their origin from request headers. Set PUBLIC_URL to the public https origin.");
+  }
+}
+
 async function main() {
   await ensureSporkWallet();
   await ensurePillarStatusTokens();
+  await warnAboutStoredSettings();
 
   const app = express();
   app.disable("x-powered-by");
+  app.set("trust proxy", TRUST_PROXY);
+  app.use((_request, response, next) => {
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("X-Frame-Options", "DENY");
+    response.setHeader("Referrer-Policy", "same-origin");
+    next();
+  });
+  app.use("/api", (_request, response, next) => {
+    // API responses include session data, wallet secrets, and tokens; never let them be cached.
+    response.setHeader("Cache-Control", "private, no-store");
+    next();
+  });
   app.use(cookieParser());
   app.use(express.json({ limit: "1mb" }));
 
@@ -1034,14 +841,21 @@ async function main() {
       return Boolean(receivedAt) && now - new Date(receivedAt as string).getTime() < 5 * 60_000;
     };
     const nodes = [...state.pillars, ...state.seedNodes];
+    // Public figures describe the published network; draft settings are only a fallback before
+    // the first publish.
+    const published = state.publishedArtifacts?.settings;
     const stats: PublicStats = {
-      chainIdentifier: state.settings.chainIdentifier,
-      genesisTimestampSec: state.settings.genesisTimestampSec,
-      goZenonRepo: state.settings.goZenonRepo,
-      goZenonRef: state.settings.goZenonRef,
-      goZenonCommit: state.settings.goZenonCommit,
+      chainIdentifier: published?.chainIdentifier ?? state.settings.chainIdentifier,
+      genesisTimestampSec: published?.genesisTimestampSec ?? state.settings.genesisTimestampSec,
+      // Report what nodes actually run: the published release, falling back to the draft settings.
+      goZenonRepo: redactUrl(
+        state.publishedArtifacts?.nodePlan?.goZenon.repoUrl ?? state.publishedArtifacts?.settings?.goZenonRepo ?? state.settings.goZenonRepo
+      ),
+      goZenonRef: state.publishedArtifacts?.nodePlan?.goZenon.ref ?? state.publishedArtifacts?.settings?.goZenonRef ?? state.settings.goZenonRef,
+      goZenonCommit:
+        state.publishedArtifacts?.nodePlan?.goZenon.commit ?? state.publishedArtifacts?.settings?.goZenonCommit ?? state.settings.goZenonCommit,
       pillarCount: state.pillars.length,
-      expectedPillars: state.settings.expectedPillars,
+      expectedPillars: published?.expectedPillars ?? state.settings.expectedPillars,
       seedNodeCount: state.seedNodes.length,
       activeNodes: nodes.filter((node) => isActive(node.nodeStatus)).length,
       totalNodes: nodes.length,
@@ -1075,7 +889,7 @@ async function main() {
       response.status(404).json({ error: "node-plan.json has not been published" });
       return;
     }
-    sendJsonFile(response, state.publishedArtifacts.nodePlan);
+    sendJsonFile(response, redactedNodePlan(state.publishedArtifacts.nodePlan));
   });
 
   app.post("/api/bootstrap/status", receiveNodeStatus);
@@ -1091,6 +905,10 @@ async function main() {
     await withBootstrapNode(request, response, (state, node) => {
       if (!state.publishedArtifacts?.nodePlan) {
         response.status(404).json({ error: "No published release is available yet" });
+        return;
+      }
+      if (nodePlanPolicyErrors(state.publishedArtifacts.nodePlan).length) {
+        response.status(409).json({ error: "The published release violates the repository policy; wait for a compliant release" });
         return;
       }
       response.json(bootstrapManifest(request, state.publishedArtifacts, node));
@@ -1166,12 +984,34 @@ async function main() {
       return;
     }
 
-    const result = await login(parsed.data.username, parsed.data.password);
+    const addressKey = request.ip ?? "unknown";
+    const accountKey = `${parsed.data.username.trim().toLowerCase()}|${addressKey}`;
+    // Count the attempt before verifying so concurrent requests cannot exceed the limit together.
+    const retryAfterMs = Math.max(loginLimiterByAddress.admit(addressKey), loginLimiterByAccountAndAddress.admit(accountKey));
+    if (retryAfterMs > 0) {
+      response.setHeader("Retry-After", String(Math.ceil(retryAfterMs / 1000)));
+      response.status(429).json({ error: "Too many login attempts. Try again later." });
+      return;
+    }
+    if (loginsInFlight >= MAX_CONCURRENT_LOGINS) {
+      response.setHeader("Retry-After", "2");
+      response.status(429).json({ error: "Too many logins in progress. Try again shortly." });
+      return;
+    }
+
+    loginsInFlight += 1;
+    let result: Awaited<ReturnType<typeof login>>;
+    try {
+      result = await login(parsed.data.username, parsed.data.password);
+    } finally {
+      loginsInFlight -= 1;
+    }
     if (!result) {
       response.status(401).json({ error: "Invalid username or password" });
       return;
     }
 
+    loginLimiterByAccountAndAddress.reset(accountKey);
     setSessionCookie(response, result.token);
     response.json({ user: result.user });
   });
@@ -1256,6 +1096,7 @@ async function main() {
     response.json({
       user,
       settings: publicSettings(state.settings),
+      repoPolicy: REPO_POLICY,
       users: managedUsers(state),
       pillars: state.pillars.map(toPublicPillar),
       seedNodes: state.seedNodes.map(publicSeedNode),
@@ -1284,6 +1125,7 @@ async function main() {
         ...parsed.data,
         minPillars: Math.min(parsed.data.minPillars, parsed.data.expectedPillars),
         goZenonCommit: parsed.data.goZenonCommit || undefined,
+        deploymentCommit: parsed.data.deploymentCommit || undefined,
         bootstrapPeers,
         genesisFunds: parsed.data.genesisFunds ?? state.settings.genesisFunds
       };
@@ -1457,18 +1299,60 @@ async function main() {
   });
 
   app.post("/api/admin/publish", requireAuth("admin"), async (_request, response) => {
-    const result = await updateState((state) => {
-      const genesis = state.finalizedGenesis?.genesis ?? buildGenesis(state.settings, state.pillars);
-      const now = new Date().toISOString();
-      if (!state.finalizedGenesis) {
-        state.finalizedGenesis = {
-          finalizedAt: now,
-          genesis
-        };
-      }
+    const current = await readState();
+    const policyErrors = releasePolicyErrors(current.settings, REPO_POLICY);
+    if (policyErrors.length) {
+      response.status(400).json({ error: `Release settings violate the repository policy: ${policyErrors.join("; ")}` });
+      return;
+    }
 
-      const settings = settingsSnapshot(state.settings);
-      state.publishedArtifacts = {
+    // Every published release is immutable: a pin the admin left empty is resolved to the current
+    // commit of the ref now, and the published plan carries both pins.
+    const release = {
+      goZenonRepo: current.settings.goZenonRepo,
+      goZenonRef: current.settings.goZenonRef,
+      goZenonCommit: current.settings.goZenonCommit,
+      deploymentRepo: current.settings.deploymentRepo,
+      deploymentRef: current.settings.deploymentRef,
+      deploymentCommit: current.settings.deploymentCommit
+    };
+    try {
+      if (!release.goZenonCommit) release.goZenonCommit = await resolveGitRef(release.goZenonRepo, release.goZenonRef);
+      if (!release.deploymentCommit) release.deploymentCommit = await resolveGitRef(release.deploymentRepo, release.deploymentRef);
+    } catch (error: unknown) {
+      response.status(502).json({
+        error: `Could not resolve the commit for the release refs (${(error as Error).message}). Set the commit pins explicitly and try again.`
+      });
+      return;
+    }
+
+    let result: PublishedArtifacts;
+    try {
+      result = await updateState((state) => {
+        // Validate against the settings actually being published, inside the serialized update.
+        const errors = releasePolicyErrors(state.settings, REPO_POLICY);
+        if (errors.length) throw new PublishError(400, `Release settings violate the repository policy: ${errors.join("; ")}`);
+        // Every published input (settings, the pillar set, the finalized genesis) must be exactly
+        // what the admin saw when they clicked publish; ref resolution above took real time.
+        if (publishInputsKey(state) !== publishInputsKey(current)) {
+          throw new PublishError(409, "Settings or registrations changed while publishing; review them and publish again");
+        }
+
+        const genesis = state.finalizedGenesis?.genesis ?? buildGenesis(state.settings, state.pillars);
+        const now = new Date().toISOString();
+        if (!state.finalizedGenesis) {
+          state.finalizedGenesis = {
+            finalizedAt: now,
+            genesis
+          };
+        }
+
+        const settings: NetworkSettingsSnapshot = {
+          ...settingsSnapshot(state.settings),
+          goZenonCommit: release.goZenonCommit,
+          deploymentCommit: release.deploymentCommit
+        };
+        state.publishedArtifacts = {
         publishedAt: now,
         genesis,
         config: buildNodeConfig(settings),
@@ -1478,10 +1362,17 @@ async function main() {
         seeders: [...settings.seeders],
         bootstrapPeers: [...(settings.bootstrapPeers ?? [])]
       };
-      state.settings.wipeDataOnPublish = false;
-      state.settings.releaseApplyAtSec = undefined;
-      return state.publishedArtifacts;
-    });
+        state.settings.wipeDataOnPublish = false;
+        state.settings.releaseApplyAtSec = undefined;
+        return state.publishedArtifacts;
+      });
+    } catch (error: unknown) {
+      if (error instanceof PublishError) {
+        response.status(error.status).json({ error: error.message });
+        return;
+      }
+      throw error;
+    }
     response.json({ published: publishedInfo(result) });
   });
 

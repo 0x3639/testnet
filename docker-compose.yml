@@ -10,6 +10,14 @@ services:
       GO_ZENON_REF: ${GO_ZENON_REF:-master}
       DEPLOYMENT_REPO: ${DEPLOYMENT_REPO:-https://github.com/hypercore-one/deployment.git}
       DEPLOYMENT_REF: ${DEPLOYMENT_REF:-main}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      ALLOWED_REPO_HOSTS: ${ALLOWED_REPO_HOSTS:-github.com}
+      DEPLOYMENT_COMMIT: ${DEPLOYMENT_COMMIT:-}
+      GO_ZENON_COMMIT: ${GO_ZENON_COMMIT:-}
+      # Caddy reaches the app over the private Docker network; only peers in private ranges may set X-Forwarded-*.
+      TRUST_PROXY: ${TRUST_PROXY:-uniquelocal}
+      ALLOWED_REPOS: ${ALLOWED_REPOS:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     volumes:
       - testnet-data:/app/data
 
@@ -19,7 +27,9 @@ services:
     depends_on:
       - app
     ports:
-      - "${HTTP_PORT:-8080}:80"
+      # This stack serves plain HTTP, so it only listens on localhost by default. Put a TLS
+      # terminating proxy in front and set HTTP_BIND=0.0.0.0 to expose it on other interfaces.
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:80"
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

@@ -15,7 +15,8 @@
     "build:web": "vite build",
     "start": "node dist/server/server/index.js",
     "account": "tsx src/server/cli.ts",
-    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json --noEmit"
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test": "tsx --test src/server/*.test.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
@@ -37,5 +38,9 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^6.0.3"
+  },
+  "overrides": {
+    "ws": "^8.21.0",
+    "qs": "^6.16.0"
   }
 }

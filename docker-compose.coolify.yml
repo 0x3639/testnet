@@ -1,0 +1,51 @@
+# Coolify deployment (Docker Compose resource from this Git repository).
+#
+# Coolify's proxy (Traefik by default) terminates TLS and routes the domain you set on the `app`
+# service in the Coolify UI to the exposed port. Do not publish host ports here; Coolify reaches
+# the container over the resource's own Docker network, so only Coolify's proxy and this service
+# share it. The magic variable SERVICE_URL_APP is filled by Coolify with that domain's URL.
+services:
+  app:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-Etc/UTC}
+      PORT: 8787
+      DATA_DIR: /app/data
+      # Required. Encrypts stored wallet passwords, node keys, and status tokens. Never change it
+      # after operators have registered. Generate with: openssl rand -hex 32
+      APP_SECRET: ${APP_SECRET:?Set APP_SECRET in the Coolify environment variables}
+      # Coolify serves the app over HTTPS, so the session cookie is TLS-only.
+      COOKIE_SECURE: "true"
+      # Fixed public origin used in generated bootstrap scripts and manifests. Defaults to the
+      # domain configured for this service in Coolify.
+      PUBLIC_URL: ${PUBLIC_URL:-${SERVICE_URL_APP}}
+      # Coolify's proxy reaches the app over a private Docker network dedicated to this resource.
+      TRUST_PROXY: ${TRUST_PROXY:-uniquelocal}
+      GO_ZENON_REPO: ${GO_ZENON_REPO:-https://github.com/zenon-network/go-zenon.git}
+      GO_ZENON_REF: ${GO_ZENON_REF:-master}
+      GO_ZENON_COMMIT: ${GO_ZENON_COMMIT:-}
+      DEPLOYMENT_REPO: ${DEPLOYMENT_REPO:-https://github.com/hypercore-one/deployment.git}
+      DEPLOYMENT_REF: ${DEPLOYMENT_REF:-main}
+      DEPLOYMENT_COMMIT: ${DEPLOYMENT_COMMIT:-}
+      ALLOWED_REPO_HOSTS: ${ALLOWED_REPO_HOSTS:-github.com}
+      ALLOWED_REPOS: ${ALLOWED_REPOS:-}
+    expose:
+      - "8787"
+    volumes:
+      - testnet-data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:8787/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+        ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  testnet-data:

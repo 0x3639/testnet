@@ -21,6 +21,7 @@ import {
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AdminOverview,
+  RepoPolicyInfo,
   AuthUser,
   GenesisFundRecord,
   ManagedUser,
@@ -118,6 +119,7 @@ function settingsKey(settings: PublicNetworkSettings): string {
     goZenonCommit: settings.goZenonCommit || "",
     deploymentRepo: settings.deploymentRepo,
     deploymentRef: settings.deploymentRef,
+    deploymentCommit: settings.deploymentCommit || "",
     wipeDataOnPublish: settings.wipeDataOnPublish,
     seeders: settings.seeders.filter(Boolean),
     bootstrapPeers: settings.bootstrapPeers.filter(Boolean),
@@ -245,6 +247,15 @@ const RPC_ENDPOINTS = [
   { label: "HTTPS", url: "https://rpc.testnet.zenon.info" }
 ];
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function repoShortName(repoUrl: string): string {
   return repoUrl.replace(/^https?:\/\/(www\.)?github\.com\//, "").replace(/\.git$/, "") || repoUrl;
 }
@@ -363,9 +374,13 @@ function Landing({ onLogin }: { onLogin: (session: Session) => void }) {
               label="Node software"
               value={
                 stats ? (
-                  <a href={stats.goZenonRepo.replace(/\.git$/, "")} target="_blank" rel="noreferrer">
-                    {repoShortName(stats.goZenonRepo)}
-                  </a>
+                  isHttpUrl(stats.goZenonRepo) ? (
+                    <a href={stats.goZenonRepo.replace(/\.git$/, "")} target="_blank" rel="noreferrer">
+                      {repoShortName(stats.goZenonRepo)}
+                    </a>
+                  ) : (
+                    repoShortName(stats.goZenonRepo)
+                  )
                 ) : (
                   "—"
                 )
@@ -1014,6 +1029,12 @@ function shortCommit(value?: string): string {
   return value.length > 12 ? `${value.slice(0, 12)}...` : value;
 }
 
+function repoPolicyHint(policy: RepoPolicyInfo): string {
+  return policy.allowedRepos
+    ? `Allowed: ${policy.allowedRepos.join(", ")} (set ALLOWED_REPOS to change)`
+    : `Any https repository on: ${policy.allowedHosts.join(", ")}`;
+}
+
 function nodeHealth(node: TelemetryNode): { label: string; tone: "ok" | "warn" | "bad" | "muted" } {
   const latest = node.nodeStatus?.latest;
   if (!latest) return { label: "No report", tone: "muted" };
@@ -1023,6 +1044,7 @@ function nodeHealth(node: TelemetryNode): { label: string; tone: "ok" | "warn" |
   const skew = clockSkewSeconds(node);
   if (skew !== undefined && Math.abs(skew) > 5 * 60) return { label: "Clock skew", tone: "bad" };
   if (skew !== undefined && Math.abs(skew) > 60) return { label: "Clock skew", tone: "warn" };
+  if (latest.node?.lastError) return { label: "Install failed", tone: "bad" };
   if (latest.node?.waitingForRelease) return { label: "Waiting", tone: "warn" };
   if (latest.node?.serviceActive === false) return { label: "Service down", tone: "bad" };
   if ((latest.logs?.errorCountLastMinute ?? 0) > 0) return { label: "Errors", tone: "bad" };
@@ -1073,7 +1095,9 @@ function NodeStatusPanel({ nodes, refresh, refreshState }: { nodes: TelemetryNod
                   <td>{node.name}</td>
                   <td className="mono">{node.nodeType}</td>
                   <td>
-                    <span className={`statusPill ${health.tone}`}>{health.label}</span>
+                    <span className={`statusPill ${health.tone}`} title={latest?.node?.lastError || undefined}>
+                      {health.label}
+                    </span>
                   </td>
                   <td className="mono">{formatAge(latest?.receivedAt)}</td>
                   <td className="mono">{formatClockSkew(node)}</td>
@@ -1090,6 +1114,11 @@ function NodeStatusPanel({ nodes, refresh, refreshState }: { nodes: TelemetryNod
                     <span className="mono">
                       E:{latest?.logs?.errorCountLastMinute ?? 0} W:{latest?.logs?.warningCountLastMinute ?? 0}
                     </span>
+                    {latest?.node?.lastError ? (
+                      <div className="logSnippet" title={latest.node.lastError}>
+                        {latest.node.lastError}
+                      </div>
+                    ) : null}
                     {recentLogs ? (
                       <div className="logSnippet" title={recentLogs}>
                         {recentLogs}
@@ -1122,11 +1151,13 @@ interface CreateSeedNodeInput {
 function SettingsForm({
   draft,
   setDraft,
+  repoPolicy,
   onSave,
   onProbeSeed
 }: {
   draft: PublicNetworkSettings;
   setDraft: React.Dispatch<React.SetStateAction<PublicNetworkSettings>>;
+  repoPolicy: RepoPolicyInfo;
   onSave: (settings: PublicNetworkSettings) => Promise<void>;
   onProbeSeed: (seed: ProbeSeedInput) => Promise<{ seed: SeedNodeProbeResult; settings: PublicNetworkSettings }>;
 }) {
@@ -1237,6 +1268,7 @@ function SettingsForm({
               value={draft.goZenonRepo}
               onChange={(event) => setDraft({ ...draft, goZenonRepo: event.target.value })}
             />
+            <small>{repoPolicyHint(repoPolicy)}</small>
           </label>
           <label>
             <span>go-zenon Branch / Tag</span>
@@ -1254,6 +1286,17 @@ function SettingsForm({
               onChange={(event) => setDraft({ ...draft, goZenonCommit: event.target.value })}
               placeholder="optional"
             />
+            <small>Full 40-character hash, or leave empty to pin the ref's current commit when you publish. Nodes refuse to start a binary whose embedded revision differs.</small>
+          </label>
+          <label>
+            <span>Deployment Commit Pin</span>
+            <input
+              className="mono"
+              value={draft.deploymentCommit ?? ""}
+              onChange={(event) => setDraft({ ...draft, deploymentCommit: event.target.value })}
+              placeholder="optional"
+            />
+            <small>Full 40-character hash, or leave empty to pin the ref's current commit when you publish. Nodes check out exactly this commit.</small>
           </label>
           <label>
             <span>Deployment Branch / Tag</span>
@@ -1271,6 +1314,7 @@ function SettingsForm({
             value={draft.deploymentRepo}
             onChange={(event) => setDraft({ ...draft, deploymentRepo: event.target.value })}
           />
+          <small>{repoPolicyHint(repoPolicy)}</small>
         </label>
         <label>
           <span>Apply Release At (UTC)</span>
@@ -1700,6 +1744,7 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
         goZenonCommit: settings.goZenonCommit,
         deploymentRepo: settings.deploymentRepo,
         deploymentRef: settings.deploymentRef,
+        deploymentCommit: settings.deploymentCommit,
         wipeDataOnPublish: settings.wipeDataOnPublish,
         seeders: settings.seeders,
         bootstrapPeers: settings.bootstrapPeers,
@@ -1986,7 +2031,7 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
           </table>
         </div>
       </section>
-      <SettingsForm draft={settingsDraft} setDraft={setSettingsDraft} onSave={saveSettings} onProbeSeed={probeSeed} />
+      <SettingsForm draft={settingsDraft} setDraft={setSettingsDraft} repoPolicy={session.repoPolicy} onSave={saveSettings} onProbeSeed={probeSeed} />
       <section className="panel jsonPanel">
         <div className="panelHeader">
           <div className="tabs">

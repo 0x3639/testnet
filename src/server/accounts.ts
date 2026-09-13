@@ -2,9 +2,18 @@ import { hashPassword, randomId, randomPassword } from "./crypto.js";
 import { updateState } from "./storage.js";
 import type { AuthUser, Role } from "../shared/types.js";
 
+export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_MAX_LENGTH = 200;
+
+export function assertPasswordPolicy(password: string): void {
+  if (password.length < PASSWORD_MIN_LENGTH) throw new Error(`Password must be at least ${PASSWORD_MIN_LENGTH} characters`);
+  if (password.length > PASSWORD_MAX_LENGTH) throw new Error(`Password must be at most ${PASSWORD_MAX_LENGTH} characters`);
+}
+
 export async function createAccount(username: string, role: Role, password = randomPassword()): Promise<{ user: AuthUser; password: string }> {
   const normalized = username.trim();
   if (!normalized) throw new Error("Username is required");
+  assertPasswordPolicy(password);
 
   const passwordHash = await hashPassword(password);
   const user = await updateState((state) => {
@@ -30,6 +39,7 @@ export async function createAccount(username: string, role: Role, password = ran
 }
 
 export async function resetAccountPassword(userId: string, password: string, keepActiveSessionUserId?: string): Promise<AuthUser> {
+  assertPasswordPolicy(password);
   const passwordHash = await hashPassword(password);
   return updateState((state) => {
     const user = state.users.find((candidate) => candidate.id === userId);

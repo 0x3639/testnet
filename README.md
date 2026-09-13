@@ -30,7 +30,7 @@ The backend is Node/Express. The frontend is React/Vite and follows the dark, co
 
 ## Important Security Notes
 
-Set `APP_SECRET` before using the app outside local testing. It is used as the server-side encryption key for sensitive stored wallet package secrets, especially wallet passwords.
+Set `APP_SECRET` before using the app outside local testing. It is used as the server-side encryption key for sensitive stored wallet package secrets, especially wallet passwords. When `NODE_ENV=production` the server refuses to start unless `APP_SECRET` is set to at least 16 characters.
 
 Do not change `APP_SECRET` after operators register pillars. Existing encrypted wallet package secrets will no longer decrypt correctly if the secret changes.
 
@@ -47,9 +47,9 @@ The generated `data/`, `dist/`, `node_modules/`, and `devnet/four-node/` directo
 
 ## Requirements
 
-- Node.js 20 or newer for local development.
+- Node.js 20 or newer for local development (the container image uses Node 24).
 - Docker and Docker Compose for container deployment.
-- A Caddy Docker Proxy network named `root_proxy-net` when using the Portainer compose file.
+- A Coolify instance for the hosted deployment (it builds the image from this repository and terminates TLS).
 
 ## Local Development
 
@@ -68,11 +68,44 @@ Useful commands:
 
 ```bash
 npm run typecheck
+npm test
 npm run build
 npm run account -- list
 npm run account -- create-admin --username admin --password "change-me"
 npm run account -- create-user --username pillar-a --password "change-me"
 ```
+
+## Runtime Environment Variables
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `APP_SECRET` | none (required in production) | Encryption key for stored wallet passwords, node keys, and status tokens. |
+| `DATA_DIR` | `./data` | Location of `app-state.json`. Created with mode `0700`; the state file is written with mode `0600`. |
+| `PUBLIC_URL` | none | Fixed public origin (for example `https://testnet.example.com`) used in generated bootstrap scripts and manifests. When unset the origin is derived from the request. |
+| `TRUST_PROXY` | `loopback` | Express `trust proxy` setting. Controls which peers may set `X-Forwarded-*` (and therefore the client address used by login rate limiting). The compose files set `uniquelocal` because Caddy reaches the app over a private Docker network; any peer in the trusted range can forge forwarded addresses, so keep it as narrow as your topology allows. |
+| `COOKIE_SECURE` | `false` | Set to `true` when served over HTTPS so the session cookie is only sent over TLS. |
+| `ALLOWED_REPO_HOSTS` | `github.com` | Comma-separated hosts that release repositories may live on. |
+| `ALLOWED_REPOS` | the default go-zenon and deployment repositories | Comma-separated repository URLs an admin may publish (host compared case-insensitively, path exactly). Add forks here to allow them; set to `*` to allow any repository on an allowed host. |
+| `GO_ZENON_COMMIT`, `DEPLOYMENT_COMMIT` | none | Default commit pins for fresh installs (full 40-character hashes). |
+
+The container runs the server as the unprivileged `node` user. The entrypoint starts as root only long enough to fix ownership of the data volume, so volumes created by earlier root-only images keep working without manual changes.
+
+Login is rate limited: 10 attempts per account from one address, or 50 attempts from one address, within 15 minutes; further attempts return `429` until the window expires. At most 8 password checks run concurrently.
+
+## Release Repository Policy
+
+Operator nodes clone and run the published repositories as root, so the server only accepts release settings that pass the repository policy: `https://` URLs without embedded credentials, on a host in `ALLOWED_REPO_HOSTS`, and (unless `ALLOWED_REPOS=*`) exactly one of the URLs in `ALLOWED_REPOS`. Refs must satisfy the same rules as `git check-ref-format --branch`. The policy is enforced when settings are saved and again when a release is published; a previously published release that violates it is withheld from nodes. The admin settings form shows the active policy.
+
+Every published release is immutable. Commit pins are full 40-character hashes; a pin left empty in the settings is resolved to the ref's current commit at publish time (by reading the repository's advertised refs over HTTPS), so the published plan always carries both pins and publishing fails if a ref cannot be resolved. Nodes then verify them:
+
+- **Deployment commit.** The agent clones the deployment repository, fetches and checks out exactly the pinned commit (so the release stays installable after the branch moves forward), and refuses to run anything from it if the checkout cannot be moved to that commit. A pin that is no longer reachable from the ref (for example after a force-push) can only be installed if the Git host serves commits by hash, which GitHub does; otherwise the release fails verification and a new one must be published.
+- **go-zenon commit.** The agent checks out go-zenon at the pinned commit locally and points the deployment script at that checkout, so the build is reproducible. The bootstrap also installs a systemd `ExecStartPre` hook (`znn-testnet-verify-znnd`) on the node service: before every start it reads the git revision Go embeds in the `znnd` binary (`go version -m`) and refuses to start unless it equals the pin and the metadata declares an unmodified tree. It also refuses to start when no release has been applied by the agent yet. The agent confirms the hook is active and runs the same check after the build; on failure it moves the binary aside as `znnd.unverified`, leaves the service stopped, and reports "Install failed" with the reason in the admin Node Status panel. A binary installed before pins were verified is rebuilt and verified the next time the agent runs.
+
+Verification failures are recorded and not retried until a new release is published or an operator runs `znn-testnet-agent --retry` on the node, which clears the record and retries immediately. Other failures (network errors, a failed build) are retried by cron every minute.
+
+Upgrade order: publish a release with this version of the builder before re-running the bootstrap on existing nodes, since the new agent only accepts pinned releases and the start-time hook refuses to start a node that has not applied one. Pillar configs generated by this version bind RPC to loopback; anything that queried a pillar's RPC directly must use the seed node instead.
+
+Generated pillar configs bind RPC (ports `35997` and `35998`) to `127.0.0.1` with no browser origins; only the local bootstrap agent needs them. Seed / non-producing node configs keep RPC on all interfaces with `*` origins so the explorer and faucet can reach them.
 
 ## Release Target Configuration
 
@@ -95,10 +128,10 @@ Use `docker-compose.yml` when you want the repo to run its own Caddy container. 
 APP_SECRET="$(openssl rand -hex 32)" docker compose up -d --build
 ```
 
-Create the first admin account inside the app container:
+Create the first admin account inside the app container. Run it as the `node` user so the state file stays owned by the service account:
 
 ```bash
-docker compose exec app node dist/server/server/cli.js create-admin --username admin
+docker compose exec --user node app node dist/server/server/cli.js create-admin --username admin
 ```
 
 Open the app:
@@ -107,153 +140,71 @@ Open the app:
 http://localhost:8080
 ```
 
+The bundled Caddy serves plain HTTP and listens on `127.0.0.1` only. To expose it on other interfaces set `HTTP_BIND=0.0.0.0`, and put a TLS-terminating proxy in front of it before sending real credentials through it (set `COOKIE_SECURE=true` once TLS is in place).
+
 The standalone stack contains:
 
 - `app`: the Node/React application on internal port `8787`.
 - `caddy`: a bundled reverse proxy exposed on `${HTTP_PORT:-8080}`.
 - `testnet-data`: persistent app state mounted at `/app/data`.
 
-## Portainer With Existing Caddy
+## Coolify
 
-Use `docker-compose.portainer.yml` when an existing Caddy Docker Proxy stack already handles TLS certificates and routing. This stack runs only the app container and attaches it to the external `root_proxy-net` network.
+Use `docker-compose.coolify.yml` to run the hosted testnet builder on Coolify. Coolify builds the image from this repository, terminates TLS with its own proxy, and routes the domain you configure to the app container. The compose file publishes no host ports: only Coolify's proxy reaches the container, over the Docker network Coolify creates for this resource.
 
-### Prerequisites
+### Create The Resource
 
-Before creating the Portainer stack, confirm:
+In Coolify:
 
-- DNS for your testnet host points at the server running Caddy.
-- Your existing Caddy Docker Proxy stack is running.
-- Caddy Docker Proxy is connected to the Docker network named `root_proxy-net`.
-- The Docker network `root_proxy-net` exists before this stack starts.
+1. Open the project and environment you want to deploy into.
+2. Click **New Resource** and choose **Docker Compose** from a **Git repository** (public repository, or a connected GitHub App for private ones).
+3. Repository: `https://github.com/0x3639/testnet.git`, branch `main`.
+4. Docker Compose location: `docker-compose.coolify.yml`.
+5. After Coolify loads the compose file, open the `app` service and set its **Domain** to the public URL, for example `https://testnet.zenon.info`.
+6. Set the environment variables below.
+7. Click **Deploy**.
 
-If the proxy network does not exist yet, create it on the Docker host:
+Leave **Connect To Predefined Network** off. It is not needed, and keeping the resource on its own network means nothing except Coolify's proxy can reach the app or forge proxy headers.
 
-```bash
-docker network create root_proxy-net
-```
+### Environment Variables
 
-If Caddy is already running from another stack, make sure that Caddy service also joins `root_proxy-net`. The testnet builder does not publish any host ports in Portainer mode; Caddy reaches it over this shared Docker network.
+Coolify shows every `${VARIABLE}` from the compose file in the resource's **Environment Variables** tab. Set:
 
-### Create The Stack From Git
-
-The recommended Portainer setup is a Git repository stack. This lets Portainer clone the repository and use `build.context: .` from `docker-compose.portainer.yml`.
-
-In Portainer:
-
-1. Open **Stacks**.
-2. Click **Add stack**.
-3. Name the stack, for example `zenon-testnet-builder`.
-4. Select **Git Repository** as the build method.
-5. Repository URL:
-
-   ```text
-   https://github.com/0x3639/testnet.git
-   ```
-
-6. Repository reference:
-
-   ```text
-   refs/heads/main
-   ```
-
-7. Compose path:
-
-   ```text
-   docker-compose.portainer.yml
-   ```
-
-8. Add the environment variables below.
-9. Click **Deploy the stack**.
-
-Set these stack environment variables:
-
-- `APP_SECRET`: a stable secret, for example the output of `openssl rand -hex 32`.
-- `TESTNET_HOST`: the public host Caddy should route, for example `testnet.zenon.info`.
+- `APP_SECRET`: required. A stable secret, for example `openssl rand -hex 32`. Never change it after operators register pillars; it encrypts stored wallet package secrets.
+- `PUBLIC_URL`: optional. Defaults to `SERVICE_URL_APP`, which Coolify fills with the domain set on the `app` service. Set it explicitly only if the public origin differs.
+- `TRUST_PROXY`: optional, defaults to `uniquelocal` so Coolify's proxy may set forwarded headers.
 - `TZ`: optional, defaults to `Etc/UTC`.
-- `GO_ZENON_REPO`: optional initial default, defaults to `https://github.com/zenon-network/go-zenon.git`.
-- `GO_ZENON_REF`: optional initial default, defaults to `master`.
-- `DEPLOYMENT_REPO`: optional initial default, defaults to `https://github.com/hypercore-one/deployment.git`.
-- `DEPLOYMENT_REF`: optional initial default, defaults to `main`.
+- `GO_ZENON_REPO`, `GO_ZENON_REF`, `GO_ZENON_COMMIT`, `DEPLOYMENT_REPO`, `DEPLOYMENT_REF`, `DEPLOYMENT_COMMIT`: optional initial release defaults; see [Release Target Configuration](#release-target-configuration).
+- `ALLOWED_REPO_HOSTS`, `ALLOWED_REPOS`: optional repository policy; see [Release Repository Policy](#release-repository-policy).
 
-Example values:
+`COOKIE_SECURE` is fixed to `true` in this compose file because Coolify serves the app over HTTPS.
 
-```text
-APP_SECRET=replace-with-a-long-random-secret
-TESTNET_HOST=testnet.zenon.info
-TZ=Etc/UTC
-```
-
-You can generate `APP_SECRET` on any trusted machine:
-
-```bash
-openssl rand -hex 32
-```
-
-Keep this value somewhere safe. Do not change it after operators register pillars because it encrypts stored wallet package secrets.
-
-The Portainer stack uses these Caddy Docker Proxy labels:
-
-```yaml
-caddy: ${TESTNET_HOST:-testnet.zenon.info}
-caddy.encode: zstd gzip
-caddy.reverse_proxy: "{{upstreams 8787}}"
-```
-
-After deployment, Caddy should route:
+After deployment the proxy routes:
 
 ```text
-https://<TESTNET_HOST>
-https://<TESTNET_HOST>/genesis.json
-https://<TESTNET_HOST>/config.json
+https://<domain>
+https://<domain>/genesis.json
+https://<domain>/config.json
+https://<domain>/node-plan.json
 ```
 
 The JSON files return `404` until an admin publishes them from the app.
 
 ### Create The First Admin
 
-After the stack is running, create the first admin account from the `testnet-builder` container.
-
-In Portainer:
-
-1. Open **Containers**.
-2. Open the `testnet-builder` container from the stack.
-3. Open **Console**.
-4. Connect with `/bin/sh`.
-5. Run:
+Open the `app` container's **Terminal** in Coolify (or `docker exec -it <container> sh` on the server) and run the CLI as the `node` user so the state file stays owned by the service account:
 
 ```bash
-node dist/server/server/cli.js create-admin --username admin
+setpriv --reuid=node --regid=node --init-groups node dist/server/server/cli.js create-admin --username admin
 ```
 
-The command prints the generated password once. Save it before closing the console.
+The command prints the generated password once. Save it before closing the terminal. You can also set the initial password yourself with `--password "replace-this-password"`.
 
-You can also set the initial password yourself:
+Then open `https://<domain>`, sign in as `admin`, create operator accounts, collect pillar and seed-node registrations, finalize, and publish.
 
-```bash
-node dist/server/server/cli.js create-admin --username admin --password "replace-this-password"
-```
+### Updating
 
-Then open:
-
-```text
-https://<TESTNET_HOST>
-```
-
-Sign in as `admin`, create operator accounts, collect pillar and seed-node registrations, finalize, and publish.
-
-### Updating The Stack
-
-When new commits are pushed to `main`:
-
-1. Open the stack in Portainer.
-2. Pull and redeploy the Git stack.
-3. Keep the same persistent volume and the same `APP_SECRET`.
-
-The app stores state in the named volume `zenon_testnet_builder_data` at `/app/data`.
-
-### Web Editor Alternative
-
-If you create a Portainer stack with the Web Editor instead of the Git Repository method, `build.context: .` will not have the repository files unless you provide them another way. For Web Editor deployments, build and publish an image first, then remove the `build:` block and set `image:` to your published image.
+Push to `main` and redeploy from Coolify (or enable automatic deployments on push). Keep the same persistent volume and the same `APP_SECRET`. The app stores state in the named volume `testnet-data` at `/app/data`; the container starts as root only long enough to fix that volume's ownership before dropping to the `node` user.
 
 ## Admin Workflow
 
@@ -300,7 +251,7 @@ Seed-node packages do not include pillar, reward, or producer wallets. The seed 
 After registering a pillar or seed node, the operator page shows a copyable command shaped like this:
 
 ```bash
-curl -fsSL "https://<TESTNET_HOST>/api/bootstrap/install.sh" | sudo env ZNN_BOOTSTRAP_TOKEN="<node-token>" ZNN_TESTNET_URL="https://<TESTNET_HOST>" bash
+curl -fsSL "https://<domain>/api/bootstrap/install.sh" | sudo env ZNN_BOOTSTRAP_TOKEN="<node-token>" ZNN_TESTNET_URL="https://<domain>" bash
 ```
 
 Run it on the node host. The script is intended for the same Linux/systemd style environment supported by `hypercore-one/deployment`.
@@ -343,7 +294,7 @@ Each registered pillar or managed seed node receives a private node status token
 Heartbeat reports are sent with a bearer token:
 
 ```bash
-curl -fsS -X POST "https://<TESTNET_HOST>/api/bootstrap/status" \
+curl -fsS -X POST "https://<domain>/api/bootstrap/status" \
   -H "Authorization: Bearer <node-status-token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -388,12 +339,12 @@ http://localhost:8080/config.json
 http://localhost:8080/node-plan.json
 ```
 
-Portainer/Caddy:
+Coolify:
 
 ```text
-https://<TESTNET_HOST>/genesis.json
-https://<TESTNET_HOST>/config.json
-https://<TESTNET_HOST>/node-plan.json
+https://<domain>/genesis.json
+https://<domain>/config.json
+https://<domain>/node-plan.json
 ```
 
 Publishing stores a snapshot. If settings, seeders, bootstrap peers, pillars, finalized genesis data, release target values, or the wipe flag change later, save them as draft changes first, then click **Publish Release** again to update the public files and node plan. Saving settings alone does not force an upgrade or wipe.
@@ -443,18 +394,14 @@ The generated token supply is reconciled against the genesis balances and embedd
 
 The helper script `scripts/create-four-node-devnet.mjs` can exercise the builder and generate a local four-node devnet package under `devnet/four-node/`.
 
-Start the standalone builder first and make sure the admin login exists. The script defaults to:
-
-- builder URL: `http://127.0.0.1:8080`
-- admin username: `admin`
-- admin password: `admin-pass-123`
+Start the standalone builder first and make sure the admin login exists. The script defaults to builder URL `http://127.0.0.1:8080` and admin username `admin`; `ADMIN_PASSWORD` has no default and must be supplied.
 
 Run:
 
 ```bash
 BUILDER_URL=http://127.0.0.1:8080 \
 ADMIN_USERNAME=admin \
-ADMIN_PASSWORD=admin-pass-123 \
+ADMIN_PASSWORD="<your admin password>" \
 node scripts/create-four-node-devnet.mjs
 ```
 
@@ -468,8 +415,8 @@ src/web/                     React admin/operator interface
 src/shared/                  Shared TypeScript types
 scripts/create-four-node-devnet.mjs
 docker/caddy/Caddyfile       Standalone Docker Caddy config
-docker-compose.yml           Standalone app + Caddy stack
-docker-compose.portainer.yml App-only stack for existing Caddy Docker Proxy
+docker-compose.yml           Standalone app + Caddy stack (local / single host)
+docker-compose.coolify.yml   App-only stack for Coolify (TLS and routing by Coolify's proxy)
 ```
 
 ## API Endpoints
