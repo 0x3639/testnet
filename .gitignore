@@ -9,3 +9,6 @@ devnet/four-node/
 npm-debug.log
 *.log
 coverage/
+
+# Design handoff prototypes (kept out of the repo by choice)
+design_handoff_admin_portal/
