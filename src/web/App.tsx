@@ -7,7 +7,6 @@ import {
   KeyRound,
   LogOut,
   Plus,
-  RefreshCcw,
   Save,
   Search,
   Server,
@@ -36,151 +35,24 @@ import type {
   SporkRecord,
   UserOverview
 } from "../shared/types";
-
-type Session = UserOverview | AdminOverview;
-type RefreshState = "idle" | "refreshing" | "updated" | "error";
-
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {})
-    }
-  });
-  const json = response.headers.get("content-type")?.includes("application/json") ? await response.json() : undefined;
-  if (!response.ok) {
-    throw new Error(json?.error ?? response.statusText);
-  }
-  return json as T;
-}
-
-function download(path: string): void {
-  window.location.assign(path);
-}
-
-function shortAddress(value: string): string {
-  if (!value) return "";
-  return `${value.slice(0, 8)}...${value.slice(-6)}`;
-}
-
-function copy(value: string): void {
-  void navigator.clipboard.writeText(value);
-}
-
-function loginUrl(): string {
-  return new URL("/", window.location.href).toString();
-}
-
-function publicUrl(path: string): string {
-  return new URL(path, window.location.href).toString();
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-function bootstrapCommand(token: string): string {
-  const baseUrl = publicUrl("/").replace(/\/$/, "");
-  return `curl -fsSL ${shellQuote(publicUrl("/api/bootstrap/install.sh"))} | sudo env ZNN_BOOTSTRAP_TOKEN=${shellQuote(
-    token
-  )} ZNN_TESTNET_URL=${shellQuote(baseUrl)} bash`;
-}
-
-function toUtcDateTimeInput(seconds?: number): string {
-  if (!seconds) return "";
-  return new Date(seconds * 1000).toISOString().slice(0, 16);
-}
-
-function fromUtcDateTimeInput(value: string): number | undefined {
-  if (!value) return undefined;
-  const timestamp = Date.parse(`${value}:00Z`);
-  return Number.isNaN(timestamp) ? undefined : Math.floor(timestamp / 1000);
-}
-
-function utcSecondsFromNow(minutes: number): number {
-  return Math.floor((Date.now() + minutes * 60 * 1000) / 1000);
-}
-
-function formatUtc(value: string): string {
-  return `${new Date(value).toISOString().slice(0, 16).replace("T", " ")} UTC`;
-}
-
-function settingsKey(settings: PublicNetworkSettings): string {
-  return JSON.stringify({
-    chainIdentifier: settings.chainIdentifier,
-    extraData: settings.extraData,
-    expectedPillars: settings.expectedPillars,
-    minPillars: settings.minPillars,
-    genesisTimestampSec: settings.genesisTimestampSec,
-    releaseApplyAtSec: settings.releaseApplyAtSec ?? null,
-    goZenonRepo: settings.goZenonRepo,
-    goZenonRef: settings.goZenonRef,
-    goZenonCommit: settings.goZenonCommit || "",
-    deploymentRepo: settings.deploymentRepo,
-    deploymentRef: settings.deploymentRef,
-    deploymentCommit: settings.deploymentCommit || "",
-    wipeDataOnPublish: settings.wipeDataOnPublish,
-    seeders: settings.seeders.filter(Boolean),
-    bootstrapPeers: settings.bootstrapPeers.filter(Boolean),
-    sporks: settings.sporks,
-    genesisFunds: settings.genesisFunds
-  });
-}
-
-function generatePassword(length = 24): string {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789_-";
-  const bytes = new Uint8Array(length);
-  window.crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
-}
-
-function AddressValue({ value }: { value: string }) {
-  return (
-    <button className="address" type="button" onClick={() => copy(value)} title={value} aria-label="Copy address">
-      <span>{shortAddress(value)}</span>
-      <Copy size={14} />
-    </button>
-  );
-}
-
-function Button({
-  children,
-  icon,
-  variant = "primary",
-  type = "button",
-  onClick,
-  disabled
-}: {
-  children: React.ReactNode;
-  icon?: React.ReactNode;
-  variant?: "primary" | "secondary" | "ghost" | "danger";
-  type?: "button" | "submit";
-  onClick?: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button className={`btn ${variant}`} type={type} onClick={onClick} disabled={disabled}>
-      {icon}
-      <span>{children}</span>
-    </button>
-  );
-}
-
-function RefreshButton({ refresh, state }: { refresh: () => Promise<void>; state: RefreshState }) {
-  const label =
-    state === "refreshing" ? "Refreshing" : state === "updated" ? "Updated" : state === "error" ? "Failed" : "Refresh";
-  return (
-    <Button
-      variant="secondary"
-      icon={<RefreshCcw className={state === "refreshing" ? "spinIcon" : undefined} size={18} />}
-      onClick={() => void refresh().catch(() => undefined)}
-      disabled={state === "refreshing"}
-    >
-      {label}
-    </Button>
-  );
-}
+import { api, type RefreshState, type Session } from "./shared/api";
+import {
+  bootstrapCommand,
+  copy,
+  download,
+  formatUtc,
+  fromUtcDateTimeInput,
+  generatePassword,
+  isHttpUrl,
+  loginUrl,
+  publicUrl,
+  repoPolicyHint,
+  repoShortName,
+  settingsKey,
+  toUtcDateTimeInput,
+  utcSecondsFromNow
+} from "./shared/format";
+import { AddressValue, Button, EndpointRow, RefreshButton, StatTile } from "./shared/ui";
 
 function Login({ onLogin, onBack }: { onLogin: (session: Session) => void; onBack?: () => void }) {
   const [username, setUsername] = useState("");
@@ -246,52 +118,6 @@ const RPC_ENDPOINTS = [
   { label: "WebSocket", url: "wss://rpc.testnet.zenon.info" },
   { label: "HTTPS", url: "https://rpc.testnet.zenon.info" }
 ];
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function repoShortName(repoUrl: string): string {
-  return repoUrl.replace(/^https?:\/\/(www\.)?github\.com\//, "").replace(/\.git$/, "") || repoUrl;
-}
-
-function EndpointRow({ label, url }: { label: string; url: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      className="endpointRow"
-      type="button"
-      onClick={() => {
-        copy(url);
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1600);
-      }}
-      aria-label={`Copy ${label} endpoint`}
-    >
-      <span className="endpointLabel">{label}</span>
-      <span className="endpointUrl mono">{url}</span>
-      <span className={`endpointCopy${copied ? " copied" : ""}`}>
-        {copied ? <CheckCircle2 size={16} /> : <Copy size={16} />}
-        {copied ? "Copied" : "Copy"}
-      </span>
-    </button>
-  );
-}
-
-function StatTile({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
-  return (
-    <div className="statTile">
-      <span className="ledger">{label}</span>
-      <strong className="mono">{value}</strong>
-      {hint ? <small>{hint}</small> : null}
-    </div>
-  );
-}
 
 function Landing({ onLogin }: { onLogin: (session: Session) => void }) {
   const [showLogin, setShowLogin] = useState(false);
@@ -1027,12 +853,6 @@ function formatClockSkew(node: TelemetryNode): string {
 function shortCommit(value?: string): string {
   if (!value) return "-";
   return value.length > 12 ? `${value.slice(0, 12)}...` : value;
-}
-
-function repoPolicyHint(policy: RepoPolicyInfo): string {
-  return policy.allowedRepos
-    ? `Allowed: ${policy.allowedRepos.join(", ")} (set ALLOWED_REPOS to change)`
-    : `Any https repository on: ${policy.allowedHosts.join(", ")}`;
 }
 
 function nodeHealth(node: TelemetryNode): { label: string; tone: "ok" | "warn" | "bad" | "muted" } {
