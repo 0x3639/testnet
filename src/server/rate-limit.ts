@@ -44,11 +44,14 @@ export class AttemptLimiter {
    * Returns 0 when the attempt is admitted.
    */
   admit(key: string, now = Date.now()): number {
-    this.prune(now);
+    this.pruneExpired(now);
     let bucket = this.buckets.get(key);
     if (!bucket || bucket.windowEndsAt <= now) {
-      bucket = { attempts: 0, windowEndsAt: now + this.options.windowMs };
+      // Only make room when a new key is inserted, and never by evicting the key being admitted:
+      // an existing (possibly blocked) bucket must keep its history.
       this.buckets.delete(key);
+      this.evictOldest();
+      bucket = { attempts: 0, windowEndsAt: now + this.options.windowMs };
       this.buckets.set(key, bucket);
     }
     if (bucket.attempts >= this.options.maxAttempts) return bucket.windowEndsAt - now;
@@ -64,14 +67,16 @@ export class AttemptLimiter {
     return this.buckets.size;
   }
 
-  private prune(now: number): void {
-    if (now - this.lastPruneAt >= PRUNE_INTERVAL_MS) {
-      this.lastPruneAt = now;
-      for (const [key, bucket] of this.buckets) {
-        if (bucket.windowEndsAt <= now) this.buckets.delete(key);
-      }
+  private pruneExpired(now: number): void {
+    if (now - this.lastPruneAt < PRUNE_INTERVAL_MS) return;
+    this.lastPruneAt = now;
+    for (const [key, bucket] of this.buckets) {
+      if (bucket.windowEndsAt <= now) this.buckets.delete(key);
     }
-    // Map iteration order is insertion order, so the first keys are the oldest.
+  }
+
+  /** Frees one slot for a new key. Map iteration order is insertion order, so the first key is the oldest. */
+  private evictOldest(): void {
     while (this.buckets.size >= this.maxKeys) {
       const oldest = this.buckets.keys().next().value;
       if (oldest === undefined) break;

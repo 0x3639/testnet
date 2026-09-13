@@ -157,11 +157,16 @@ describe("generated bootstrap script", { skip: !hasBash && "bash not available" 
     it("record_install_failure and quarantine_binary stop the service and move the binary aside", () => {
       fakeSystemctl("x");
       writeFileSync(path.join(bin, "znnd"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      // A previously successful install must be forgotten so the next attempt rebuilds and re-verifies.
+      writeFileSync(path.join(state, "install-state.json"), JSON.stringify({ desiredKey: "key1", binaryKey: "b", verifiedCommit: GOOD }));
       const result = runHelpers('record_install_failure "key1" "evt1" "boom"; quarantine_binary');
       assert.equal(result.status, 0);
       const installState = JSON.parse(readFileSync(path.join(state, "install-state.json"), "utf8"));
       assert.equal(installState.failedKey, "key1");
       assert.equal(installState.lastError, "boom");
+      assert.equal(installState.desiredKey, undefined);
+      assert.equal(installState.verifiedCommit, undefined);
+      assert.equal(existsSync(path.join(state, "install-state.json.tmp")), false);
       assert.equal(existsSync(path.join(bin, "znnd")), false);
       assert.equal(existsSync(path.join(bin, "znnd.unverified")), true);
       assert.match(readFileSync(path.join(root, "systemctl.log"), "utf8"), /systemctl stop go-zenon/);
@@ -216,7 +221,13 @@ describe("generated bootstrap script", { skip: !hasBash && "bash not available" 
 
     describe("checkout_pinned", { skip: !hasGit && "git not available" }, () => {
       function git(cwd: string, ...args: string[]): string {
-        const result = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "advice.detachedHead=false", ...args], { cwd, encoding: "utf8" });
+        // Disable signing and hooks so a developer's global git config (e.g. gpg-signed commits
+        // prompting for a passphrase) cannot stall the test.
+        const result = spawnSync(
+          "git",
+          ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "advice.detachedHead=false", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args],
+          { cwd, encoding: "utf8", timeout: 60_000 }
+        );
         assert.equal(result.status, 0, result.stderr);
         return result.stdout.trim();
       }

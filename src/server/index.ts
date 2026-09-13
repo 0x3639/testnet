@@ -724,10 +724,12 @@ async function withBootstrapNode(
 
 
 function historySample(report: NodeStatusReport): NodeStatusReport {
-  // History only needs the numeric time series; drop per-peer detail and log lines so the state
-  // file stays small regardless of what a node reports.
+  // History only needs the numeric time series; drop per-peer detail, log lines, and the last
+  // error text so the state file stays small regardless of what a node reports.
+  const { lastError: _lastError, ...node } = report.node ?? {};
   return {
     ...report,
+    node: report.node ? node : undefined,
     network: report.network
       ? {
           peerCount: report.network.peerCount,

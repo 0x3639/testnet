@@ -34,6 +34,21 @@ describe("AttemptLimiter", () => {
     assert.ok(limiter.size <= 100);
   });
 
+  it("never evicts the key being admitted, so a blocked key stays blocked when the map is full", () => {
+    const limiter = new AttemptLimiter({ maxAttempts: 2, windowMs: 60_000, maxKeys: 3 });
+    assert.equal(limiter.admit("victim", 0), 0);
+    assert.equal(limiter.admit("victim", 1), 0);
+    assert.ok(limiter.admit("victim", 2) > 0, "victim is blocked");
+    limiter.admit("filler-1", 3);
+    limiter.admit("filler-2", 4);
+    assert.equal(limiter.size, 3);
+    // The map is full and "victim" is the oldest key; re-admitting it must not reset its bucket.
+    assert.ok(limiter.admit("victim", 5) > 0, "victim must remain blocked");
+    // Inserting a genuinely new key evicts the oldest entry instead.
+    assert.equal(limiter.admit("new", 6), 0);
+    assert.equal(limiter.size, 3);
+  });
+
   it("prunes expired keys", () => {
     const limiter = new AttemptLimiter({ maxAttempts: 5, windowMs: 1000, maxKeys: 1000 });
     for (let index = 0; index < 50; index += 1) limiter.admit(`user-${index}`, 0);

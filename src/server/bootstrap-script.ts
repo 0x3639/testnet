@@ -317,6 +317,9 @@ quarantine_binary() {
 }
 
 record_install_failure() {
+  # Deliberately replaces the whole install state rather than merging into it: after a failure the
+  # node must not remember a desiredKey/verifiedCommit, or a later --retry could take the fast
+  # path and report success without rebuilding and re-verifying the (possibly quarantined) binary.
   local failed_key="$1" event_id="$2" message="$3"
   echo "$message" >&2
   jq -n \\
@@ -324,7 +327,8 @@ record_install_failure() {
     --arg eventId "$event_id" \\
     --arg lastError "$message" \\
     --arg failedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
-    '{ failedKey: $failedKey, eventId: $eventId, lastError: $lastError, failedAt: $failedAt }' > "$INSTALL_STATE_FILE"
+    '{ failedKey: $failedKey, eventId: $eventId, lastError: $lastError, failedAt: $failedAt }' > "$INSTALL_STATE_FILE.tmp" || return 1
+  mv -f "$INSTALL_STATE_FILE.tmp" "$INSTALL_STATE_FILE"
 }
 
 patch_deployment_preflight() {
