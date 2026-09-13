@@ -50,19 +50,26 @@ retire_previous_agent() {
     echo "Refreshing the existing testnet agent configuration for $BASE_URL."
   fi
   # Any other cron entry that runs the agent (a manual addition or an older layout) would keep
-  # reporting elsewhere, so remove it.
+  # reporting elsewhere. Remove only those lines; unrelated jobs in a shared file are kept, and a
+  # file left without any job is deleted.
   for stray in "$CRON_DIR"/*; do
     [[ -f "$stray" && "$stray" != "$CRON_FILE" ]] || continue
     if grep -q 'znn-testnet-agent' "$stray" 2>/dev/null; then
-      echo "Removing stray cron entry $stray"
-      rm -f "$stray"
+      echo "Removing znn-testnet-agent lines from $stray"
+      grep -v 'znn-testnet-agent' "$stray" > "$stray.znn-tmp" || true
+      if grep -qE '^[[:space:]]*[^#[:space:]]' "$stray.znn-tmp"; then
+        mv -f "$stray.znn-tmp" "$stray"
+      else
+        rm -f "$stray.znn-tmp" "$stray"
+      fi
     fi
   done
+  # A failure here must stop the installer: leaving the old entry in place would run two agents.
   if command -v crontab >/dev/null 2>&1 && crontab -l 2>/dev/null | grep -q 'znn-testnet-agent'; then
     echo "Removing znn-testnet-agent lines from root's crontab"
     local remaining
     remaining="$(crontab -l 2>/dev/null | grep -v 'znn-testnet-agent' || true)"
-    printf '%s\\n' "$remaining" | crontab - || true
+    printf '%s\\n' "$remaining" | crontab -
   fi
   rm -f "$CRON_FILE"
 }
