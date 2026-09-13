@@ -63,7 +63,10 @@ export function LaunchOps({ overview, nodes, settingsDirty, evaluation, onNaviga
             <button key={step.id} type="button" className={`checklistRow ${step.state}`} onClick={() => onNavigate(step.section)}>
               <StepCircle state={step.state} index={step.index} />
               <strong>{step.label}{step.optional ? <span className="mutedText"> (optional)</span> : null}</strong>
-              <span className="mutedText">{step.description}</span>
+              <span className="mutedText">
+                {step.description}
+                {step.state === "current" && step.reason ? <span className="stepReason"> Blocked: {step.reason}.</span> : null}
+              </span>
               <span className="ledger">{SECTION_LABELS[step.section]}</span>
             </button>
           ))}

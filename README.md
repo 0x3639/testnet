@@ -261,7 +261,7 @@ To move an existing testnet builder to Coolify without losing registrations:
 
 ## Admin Workflow
 
-The admin console has six sections: Status, Launch Ops, Users, Nodes, Network, and Release. The launch bar's playbook (Launch, Relaunch, or Change release) tracks which step comes next. On the Release page, Finalize is required before the first Publish, and the page enforces that order.
+The admin console has six sections: Status, Launch Ops, Users, Nodes, Network, and Release. The launch bar's playbook (Launch, Relaunch, or Change release) tracks which step comes next. On the Release page, Finalize is required before the first Publish, and the page enforces that order. The server refuses to finalize while fewer than the minimum pillars are registered, the genesis start time is in the past, or the spork address is missing; the launch bar names the condition that blocks the current step. Changing a genesis input (chain identifier, extra data, spork address, genesis time, sporks, or genesis funds) or the pillar set discards the finalized genesis, so finalize again before publishing.
 
 1. Sign in as an admin.
 2. In **Users**, create one operator login per expected pillar and managed seed node.

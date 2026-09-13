@@ -102,6 +102,47 @@ describe("launch playbook", () => {
     assert.equal(e.steps[2].state, "current");
   });
 
+  it("explains why 'Configure network' is blocked", () => {
+    const o = overview({
+      users: [{ id: "a", username: "admin", role: "admin", createdAt: "" }, { id: "u", username: "op", role: "user", createdAt: "" }],
+      pillars: [pillar("p1", false), pillar("p2", false)]
+    });
+    const past = { ...o.settings, genesisTimestampSec: Math.floor(NOW / 1000) - HOUR };
+    assert.equal(evaluatePlaybook("launch", input(o, { draft: past })).current?.reason, "genesis start time is in the past");
+
+    const noSeeders = overview({ ...o, readiness: [{ label: "Seeders", ok: false, detail: "" }] });
+    assert.equal(evaluatePlaybook("launch", input(noSeeders, { draft: { ...noSeeders.settings, seeders: [] } })).current?.reason, "no seeders configured");
+    assert.equal(evaluatePlaybook("launch", input(noSeeders, { settingsDirty: true })).current?.reason, "seeders not saved yet");
+    // Reasons belong to the current step only.
+    const e = evaluatePlaybook("launch", input(o, { draft: past }));
+    assert.equal(e.steps[0].reason, undefined);
+    assert.equal(e.steps[3].reason, undefined);
+  });
+
+  it("counts a publish older than the latest finalize as not done", () => {
+    const o = overview({
+      users: [{ id: "a", username: "admin", role: "admin", createdAt: "" }, { id: "u", username: "op", role: "user", createdAt: "" }],
+      pillars: [pillar("p1", true), pillar("p2", true)],
+      finalizedAt: "2026-09-13T11:30:00Z",
+      published: { publishedAt: "2026-09-13T11:00:00Z", genesisPath: "/genesis.json", configPath: "/config.json", chainIdentifier: 1, seeders: [], bootstrapPeers: [] }
+    });
+    const e = evaluatePlaybook("launch", input(o));
+    assert.equal(e.steps[4].state, "done");
+    assert.equal(e.steps[5].state, "current");
+    assert.equal(e.current?.reason, "published before the latest finalize");
+    assert.equal(e.steps[6].state, "pending");
+  });
+
+  it("reports how many nodes are not online", () => {
+    const o = overview({
+      users: [{ id: "a", username: "admin", role: "admin", createdAt: "" }, { id: "u", username: "op", role: "user", createdAt: "" }],
+      pillars: [pillar("p1", true), pillar("p2", false)],
+      finalizedAt: "2026-09-13T10:00:00Z",
+      published: { publishedAt: "2026-09-13T11:00:00Z", genesisPath: "/genesis.json", configPath: "/config.json", chainIdentifier: 1, seeders: [], bootstrapPeers: [] }
+    });
+    assert.equal(evaluatePlaybook("launch", input(o)).current?.reason, "1 of 2 nodes not online");
+  });
+
   it("completes when everything is published and all nodes are online", () => {
     const o = overview({
       users: [{ id: "a", username: "admin", role: "admin", createdAt: "" }, { id: "u", username: "op", role: "user", createdAt: "" }],

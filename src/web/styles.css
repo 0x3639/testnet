@@ -1452,6 +1452,10 @@ pre {
   margin-left: auto;
 }
 
+.stepReason {
+  color: var(--warn);
+}
+
 .btn.small {
   min-height: 30px;
   padding: 4px 12px;

@@ -33,7 +33,10 @@ export function LaunchBar({ playbook, onPlaybookChange, evaluation, onNavigate }
       <div className="nextHint">
         {current ? (
           <>
-            <span>Next: <strong>{current.label}</strong></span>
+            <span>
+              Next: <strong>{current.label}</strong>
+              {current.reason ? <span className="stepReason"> · {current.reason}</span> : null}
+            </span>
             <button type="button" className="btn primary small" onClick={() => onNavigate(current.section)}>Go</button>
           </>
         ) : (

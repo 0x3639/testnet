@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { publishInputsKey, publishSnapshotKey, settingsSnapshot } from "./settings.js";
+import { genesisSettingsKey, publishInputsKey, publishSnapshotKey, settingsSnapshot } from "./settings.js";
 import type { NetworkSettings, PillarRecord } from "../shared/types.js";
 
 const base: NetworkSettings = {
@@ -39,6 +39,36 @@ describe("publish snapshot", () => {
       { sporks: [{ id: "0".repeat(64), name: "n", description: "", activated: true, enforcementHeight: 0 }] }
     ] as Partial<NetworkSettings>[]) {
       assert.notEqual(publishSnapshotKey({ ...base, ...change }), key, JSON.stringify(change));
+    }
+  });
+});
+
+describe("genesis settings key", () => {
+  it("changes for every input baked into genesis.json", () => {
+    const key = genesisSettingsKey(base);
+    for (const change of [
+      { chainIdentifier: 2 },
+      { extraData: "y" },
+      { sporkAddress: "z2" },
+      { genesisTimestampSec: 101 },
+      { sporks: [{ id: "0".repeat(64), name: "n", description: "", activated: true, enforcementHeight: 0 }] },
+      { genesisFunds: [{ address: "z3", znn: 1, qsr: 0, fusedQsr: 0 }] }
+    ] as Partial<NetworkSettings>[]) {
+      assert.notEqual(genesisSettingsKey({ ...base, ...change }), key, JSON.stringify(change));
+    }
+  });
+
+  it("ignores settings that only reach config.json or the readiness checks", () => {
+    const key = genesisSettingsKey(base);
+    for (const change of [
+      { seeders: ["enode://x"] },
+      { bootstrapPeers: ["/ip4/1.2.3.4/tcp/1"] },
+      { minPillars: 1 },
+      { expectedPillars: 9 },
+      { goZenonRef: "v1" },
+      { wipeDataOnPublish: true }
+    ] as Partial<NetworkSettings>[]) {
+      assert.equal(genesisSettingsKey({ ...base, ...change }), key, JSON.stringify(change));
     }
   });
 });

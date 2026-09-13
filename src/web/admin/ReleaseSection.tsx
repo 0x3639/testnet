@@ -87,7 +87,7 @@ export function ReleaseSection({
   const finalized = Boolean(overview.finalizedAt);
   const published = Boolean(overview.published);
   const pillarCount = overview.pillars.length;
-  const expected = overview.settings.expectedPillars;
+  const minPillars = overview.settings.minPillars;
 
   return (
     <>
@@ -126,7 +126,7 @@ export function ReleaseSection({
             <p className="mutedText">
               {overview.finalizedAt
                 ? `Finalized ${new Date(overview.finalizedAt).toLocaleString()}`
-                : `Not finalized yet. Requires saved settings and ${pillarCount} of ${expected} pillars.`}
+                : `Not finalized yet. Requires saved settings, at least ${minPillars} pillars (${pillarCount} registered), a future genesis time and a spork address.`}
             </p>
           </div>
           <Button icon={<CheckCircle2 size={18} />} onClick={() => void onFinalize()} disabled={settingsDirty}>
