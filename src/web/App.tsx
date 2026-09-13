@@ -35,6 +35,7 @@ import type {
   SporkRecord,
   UserOverview
 } from "../shared/types";
+import { formatAge, formatClockSkew, heightLag, nodeHealth, shortCommit, syncStateLabel, telemetryNodes, type TelemetryNode } from "./admin/telemetry";
 import { api, type RefreshState, type Session } from "./shared/api";
 import {
   bootstrapCommand,
@@ -798,83 +799,6 @@ function PublishedArtifacts({ published }: { published: PublishedArtifactsInfo }
   );
 }
 
-function formatAge(value?: string): string {
-  if (!value) return "No report";
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) return "Unknown";
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ago`;
-}
-
-function syncStateLabel(value?: number): string {
-  if (value === 1) return "Syncing";
-  if (value === 2) return "Synced";
-  if (value === 0) return "Unknown";
-  return value === undefined ? "Unknown" : String(value);
-}
-
-type TelemetryNode = {
-  id: string;
-  name: string;
-  nodeType: "pillar" | "seed";
-  nodeStatus?: PublicPillar["nodeStatus"];
-};
-
-function heightLag(node: TelemetryNode): string {
-  const sync = node.nodeStatus?.latest?.sync;
-  if (sync?.currentHeight === undefined || sync.targetHeight === undefined) return "-";
-  return String(Math.max(0, sync.targetHeight - sync.currentHeight));
-}
-
-function clockSkewSeconds(node: TelemetryNode): number | undefined {
-  const latest = node.nodeStatus?.latest;
-  if (!latest?.reportedAt) return undefined;
-  const reportedAt = Date.parse(latest.reportedAt);
-  const receivedAt = Date.parse(latest.receivedAt);
-  if (Number.isNaN(reportedAt) || Number.isNaN(receivedAt)) return undefined;
-  return Math.round((reportedAt - receivedAt) / 1000);
-}
-
-function formatClockSkew(node: TelemetryNode): string {
-  const skew = clockSkewSeconds(node);
-  if (skew === undefined) return "-";
-  const abs = Math.abs(skew);
-  const sign = skew > 0 ? "+" : skew < 0 ? "-" : "";
-  if (abs < 60) return `${sign}${abs}s`;
-  const minutes = Math.floor(abs / 60);
-  const seconds = abs % 60;
-  return seconds ? `${sign}${minutes}m ${seconds}s` : `${sign}${minutes}m`;
-}
-
-function shortCommit(value?: string): string {
-  if (!value) return "-";
-  return value.length > 12 ? `${value.slice(0, 12)}...` : value;
-}
-
-function nodeHealth(node: TelemetryNode): { label: string; tone: "ok" | "warn" | "bad" | "muted" } {
-  const latest = node.nodeStatus?.latest;
-  if (!latest) return { label: "No report", tone: "muted" };
-
-  const ageMs = Date.now() - Date.parse(latest.receivedAt);
-  if (!Number.isNaN(ageMs) && ageMs > 5 * 60 * 1000) return { label: "Stale", tone: "bad" };
-  const skew = clockSkewSeconds(node);
-  if (skew !== undefined && Math.abs(skew) > 5 * 60) return { label: "Clock skew", tone: "bad" };
-  if (skew !== undefined && Math.abs(skew) > 60) return { label: "Clock skew", tone: "warn" };
-  if (latest.node?.lastError) return { label: "Install failed", tone: "bad" };
-  if (latest.node?.waitingForRelease) return { label: "Waiting", tone: "warn" };
-  if (latest.node?.serviceActive === false) return { label: "Service down", tone: "bad" };
-  if ((latest.logs?.errorCountLastMinute ?? 0) > 0) return { label: "Errors", tone: "bad" };
-  if (latest.sync?.state !== undefined && latest.sync.state !== 2) return { label: syncStateLabel(latest.sync.state), tone: "warn" };
-  if (latest.sync?.currentHeight !== undefined && latest.sync.targetHeight !== undefined && latest.sync.targetHeight - latest.sync.currentHeight > 5) {
-    return { label: "Lagging", tone: "warn" };
-  }
-  return { label: "Online", tone: "ok" };
-}
-
 function NodeStatusPanel({ nodes, refresh, refreshState }: { nodes: TelemetryNode[]; refresh: () => Promise<void>; refreshState: RefreshState }) {
   return (
     <section className="panel wide">
@@ -1509,23 +1433,7 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
   const settingsBaseRef = useRef(session.settings);
   const settingsDirty = useMemo(() => settingsKey(settingsDraft) !== settingsKey(settingsBase), [settingsDraft, settingsBase]);
   const json = useMemo(() => JSON.stringify(tab === "genesis" ? session.genesis : session.configTemplate, null, 2), [session, tab]);
-  const telemetryNodes: TelemetryNode[] = useMemo(
-    () => [
-      ...session.pillars.map((pillar) => ({
-        id: pillar.id,
-        name: pillar.pillarName,
-        nodeType: "pillar" as const,
-        nodeStatus: pillar.nodeStatus
-      })),
-      ...session.seedNodes.map((seedNode) => ({
-        id: seedNode.id,
-        name: seedNode.nodeName,
-        nodeType: "seed" as const,
-        nodeStatus: seedNode.nodeStatus
-      }))
-    ],
-    [session.pillars, session.seedNodes]
-  );
+  const nodes: TelemetryNode[] = useMemo(() => telemetryNodes(session), [session.pillars, session.seedNodes]);
   useEffect(() => {
     const previousBase = settingsBaseRef.current;
     settingsBaseRef.current = session.settings;
@@ -1694,7 +1602,7 @@ function AdminView({ session, refresh, refreshState }: { session: AdminOverview;
         onResetPassword={resetUserPassword}
         onDeleteUser={deleteUser}
       />
-      <NodeStatusPanel nodes={telemetryNodes} refresh={refresh} refreshState={refreshState} />
+      <NodeStatusPanel nodes={nodes} refresh={refresh} refreshState={refreshState} />
       <section className="panel wide">
         <div className="panelHeader">
           <div>

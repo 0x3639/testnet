@@ -16,7 +16,7 @@
     "start": "node dist/server/server/index.js",
     "account": "tsx src/server/cli.ts",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.web.json --noEmit",
-    "test": "tsx --test src/server/*.test.ts"
+    "test": "tsx --test src/server/*.test.ts src/web/admin/*.test.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
