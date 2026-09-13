@@ -144,6 +144,45 @@ describe("generated bootstrap script", { skip: !hasBash && "bash not available" 
     });
   });
 
+  describe("installer", () => {
+    it("retire_previous_agent replaces a configuration that reported to another builder", () => {
+      const installer = script.split("cat > /usr/local/bin/znn-testnet-verify-znnd")[0];
+      const fn = bashFunction(installer, "retire_previous_agent");
+      const cronDir = path.join(root, "cron.d");
+      mkdirSync(cronDir, { recursive: true });
+      writeFileSync(path.join(cronDir, "znn-testnet-agent"), "ZNN_BOOTSTRAP_TOKEN=t\nZNN_TESTNET_URL=https://old.example.test\n* * * * * root /usr/local/bin/znn-testnet-agent\n");
+      writeFileSync(path.join(cronDir, "leftover"), "# old layout\n* * * * * root flock /usr/local/bin/znn-testnet-agent\n");
+      writeFileSync(path.join(cronDir, "shared"), "# shared file\n*/5 * * * * root /usr/local/bin/znn-testnet-agent\n0 3 * * * root /usr/sbin/logrotate\n");
+      writeFileSync(path.join(cronDir, "unrelated"), "0 3 * * * root /usr/sbin/logrotate\n");
+      // crontab shim: -l prints the stored root crontab, "-" replaces it from stdin.
+      const crontabStore = path.join(root, "root-crontab");
+      writeFileSync(crontabStore, "@reboot /usr/local/bin/znn-testnet-agent\n0 4 * * * /usr/bin/true\n");
+      writeFileSync(path.join(bin, "crontab"), `#!/bin/sh\ncase "$1" in\n  -l) cat "${crontabStore}" ;;\n  -) cat > "${crontabStore}" ;;\nesac\n`, { mode: 0o755 });
+      const result = spawnSync("bash", ["-c", `set -euo pipefail; CRON_DIR=${JSON.stringify(cronDir)}; CRON_FILE="$CRON_DIR/znn-testnet-agent"; BASE_URL=https://new.example.test\n${fn}\nretire_previous_agent`], { env: env(), encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /reported to https:\/\/old\.example\.test and will now report to https:\/\/new\.example\.test only/);
+      assert.equal(existsSync(path.join(cronDir, "znn-testnet-agent")), false);
+      assert.equal(existsSync(path.join(cronDir, "leftover")), false, "a file with only agent lines is removed");
+      assert.equal(readFileSync(path.join(cronDir, "shared"), "utf8"), "# shared file\n0 3 * * * root /usr/sbin/logrotate\n", "unrelated jobs in a shared file survive");
+      assert.equal(existsSync(path.join(cronDir, "unrelated")), true);
+      assert.deepEqual(readdirSync(cronDir).filter((name) => name.endsWith(".znn-tmp")), []);
+      assert.equal(readFileSync(crontabStore, "utf8"), "0 4 * * * /usr/bin/true\n");
+      rmSync(path.join(bin, "crontab"));
+    });
+
+    it("retire_previous_agent fails when root's crontab cannot be rewritten", () => {
+      const installer = script.split("cat > /usr/local/bin/znn-testnet-verify-znnd")[0];
+      const fn = bashFunction(installer, "retire_previous_agent");
+      const cronDir = path.join(root, "cron.d-fail");
+      mkdirSync(cronDir, { recursive: true });
+      writeFileSync(path.join(bin, "crontab"), `#!/bin/sh\ncase "$1" in\n  -l) echo "@reboot /usr/local/bin/znn-testnet-agent" ;;\n  -) echo "crontab: write failed" >&2; exit 1 ;;\nesac\n`, { mode: 0o755 });
+      const result = spawnSync("bash", ["-c", `set -euo pipefail; CRON_DIR=${JSON.stringify(cronDir)}; CRON_FILE="$CRON_DIR/znn-testnet-agent"; BASE_URL=https://new.example.test\n${fn}\nretire_previous_agent\necho REACHED`], { env: env(), encoding: "utf8" });
+      assert.notEqual(result.status, 0);
+      assert.doesNotMatch(result.stdout, /REACHED/);
+      rmSync(path.join(bin, "crontab"));
+    });
+  });
+
   describe("agent helpers", () => {
     it("verify_gate_active requires the ExecStartPre hook and a working daemon-reload", () => {
       fakeSystemctl("{ path=/usr/local/bin/znn-testnet-verify-znnd ; argv[]=/usr/local/bin/znn-testnet-verify-znnd }");
