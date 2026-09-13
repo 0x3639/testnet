@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_GENESIS_FUNDS, DEFAULT_SPORKS, DEFAULT_SPORKS_VERSION } from "./constants.js";
 import { multiaddrFromEnode, multiaddrFromPublicKey } from "./libp2p.js";
@@ -7,11 +7,12 @@ import type { AppState, NetworkSettings } from "../shared/types.js";
 
 const DATA_DIR = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
 const STATE_FILE = path.join(DATA_DIR, "app-state.json");
-const DEFAULT_GO_ZENON_REPO = process.env.GO_ZENON_REPO ?? "https://github.com/zenon-network/go-zenon.git";
+export const DEFAULT_GO_ZENON_REPO = process.env.GO_ZENON_REPO ?? "https://github.com/zenon-network/go-zenon.git";
 const DEFAULT_GO_ZENON_REF = process.env.GO_ZENON_REF ?? "master";
 const DEFAULT_GO_ZENON_COMMIT = process.env.GO_ZENON_COMMIT;
-const DEFAULT_DEPLOYMENT_REPO = process.env.DEPLOYMENT_REPO ?? "https://github.com/hypercore-one/deployment.git";
+export const DEFAULT_DEPLOYMENT_REPO = process.env.DEPLOYMENT_REPO ?? "https://github.com/hypercore-one/deployment.git";
 const DEFAULT_DEPLOYMENT_REF = process.env.DEPLOYMENT_REF ?? "main";
+const DEFAULT_DEPLOYMENT_COMMIT = process.env.DEPLOYMENT_COMMIT;
 let stateUpdateQueue = Promise.resolve();
 
 function defaultSettings(): NetworkSettings {
@@ -26,6 +27,7 @@ function defaultSettings(): NetworkSettings {
     goZenonCommit: DEFAULT_GO_ZENON_COMMIT,
     deploymentRepo: DEFAULT_DEPLOYMENT_REPO,
     deploymentRef: DEFAULT_DEPLOYMENT_REF,
+    deploymentCommit: DEFAULT_DEPLOYMENT_COMMIT,
     releaseApplyAtSec: undefined,
     wipeDataOnPublish: false,
     sporkAddress: "",
@@ -105,8 +107,25 @@ function normalizeState(state: Partial<AppState>): AppState {
   };
 }
 
+// The state file holds password hashes, session hashes, encrypted wallet passwords, and node keys.
+// Keep it and its directory readable by the service user only.
+const DATA_DIR_MODE = 0o700;
+const STATE_FILE_MODE = 0o600;
+
+let permissionsEnforced = false;
+
 async function ensureDataDir(): Promise<void> {
-  await mkdir(DATA_DIR, { recursive: true });
+  await mkdir(DATA_DIR, { recursive: true, mode: DATA_DIR_MODE });
+  if (permissionsEnforced) return;
+  // mkdir's mode only applies to directories it creates, so tighten anything that already existed
+  // (deployments created before these modes were enforced). This fails closed: if the modes cannot
+  // be enforced the error propagates and the caller (ultimately startup) fails, and the flag stays
+  // unset so the next call tries again.
+  await chmod(DATA_DIR, DATA_DIR_MODE);
+  await chmod(STATE_FILE, STATE_FILE_MODE).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+  });
+  permissionsEnforced = true;
 }
 
 function findJsonValueEnd(content: string, start: number): number | undefined {
@@ -194,7 +213,7 @@ function parseStateContent(content: string): { state: AppState; recovered: boole
 async function writeAtomic(filePath: string, content: string): Promise<void> {
   await ensureDataDir();
   const tempFile = path.join(DATA_DIR, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
-  await writeFile(tempFile, content, "utf8");
+  await writeFile(tempFile, content, { encoding: "utf8", mode: STATE_FILE_MODE });
   try {
     await rename(tempFile, filePath);
   } catch (error) {

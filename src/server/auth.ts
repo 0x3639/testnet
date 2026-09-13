@@ -5,6 +5,9 @@ import type { AuthUser, Role, StoredSession, StoredUser } from "../shared/types.
 
 const SESSION_COOKIE = "zenon_session";
 const SESSION_DAYS = 7;
+// A syntactically valid scrypt record that no password matches. Verifying against it when the
+// username is unknown keeps login timing the same for known and unknown accounts.
+const DUMMY_PASSWORD_HASH = `scrypt:${"00".repeat(16)}:${"00".repeat(64)}`;
 
 export interface AuthedRequest extends Request {
   user: AuthUser;
@@ -21,10 +24,8 @@ export function publicUser(user: StoredUser): AuthUser {
 export async function login(username: string, password: string): Promise<{ token: string; user: AuthUser } | null> {
   const state = await readState();
   const user = state.users.find((candidate) => candidate.username.toLowerCase() === username.toLowerCase());
-  if (!user) return null;
-
-  const ok = await verifyPassword(password, user.passwordHash);
-  if (!ok) return null;
+  const ok = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+  if (!user || !ok) return null;
 
   const token = randomId(32);
   const now = new Date();

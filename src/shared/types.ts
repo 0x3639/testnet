@@ -79,6 +79,7 @@ export interface NetworkSettings {
   goZenonCommit?: string;
   deploymentRepo: string;
   deploymentRef: string;
+  deploymentCommit?: string;
   releaseApplyAtSec?: number;
   wipeDataOnPublish: boolean;
   sporkAddress: string;
@@ -163,6 +164,7 @@ export interface ReleaseTarget {
   deployment: {
     repoUrl: string;
     ref: string;
+    commit?: string;
   };
 }
 
@@ -230,6 +232,8 @@ export interface NodeStatusReport {
     installedCommit?: string;
     genesisSha256?: string;
     configSha256?: string;
+    /** Set by the bootstrap agent when the last release could not be applied, e.g. a commit mismatch. */
+    lastError?: string;
   };
   sync?: {
     state?: number;
@@ -260,9 +264,15 @@ export interface PublicNodeStatus {
   historyCount: number;
 }
 
+export interface RepoPolicyInfo {
+  allowedHosts: string[];
+  allowedRepos?: string[];
+}
+
 export interface AdminOverview {
   user: AuthUser;
   settings: PublicNetworkSettings;
+  repoPolicy: RepoPolicyInfo;
   users: ManagedUser[];
   pillars: PublicPillar[];
   seedNodes: PublicSeedNode[];

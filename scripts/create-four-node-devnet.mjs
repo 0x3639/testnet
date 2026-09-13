@@ -5,7 +5,14 @@ import JSZip from "jszip";
 
 const BASE_URL = process.env.BUILDER_URL ?? "http://127.0.0.1:8080";
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? "admin";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "admin-pass-123";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!ADMIN_PASSWORD) {
+  console.error("Set ADMIN_PASSWORD to the builder admin password (no default is provided).");
+  process.exit(1);
+}
+// Generated files contain private keys, wallet passwords, and operator logins.
+const SECRET_FILE = { mode: 0o600 };
+const SECRET_DIR = { recursive: true, mode: 0o700 };
 const OUT_DIR = path.resolve("devnet", "four-node");
 const DEVNET_DIR = path.join(OUT_DIR, "devnet");
 const OPERATORS_DIR = path.join(OUT_DIR, "operators");
@@ -329,19 +336,20 @@ async function main() {
   overview = (await request("/api/admin/overview", {}, adminCookie)).body;
 
   await rm(OUT_DIR, { recursive: true, force: true });
-  await mkdir(DEVNET_DIR, { recursive: true });
-  await mkdir(OPERATORS_DIR, { recursive: true });
+  await mkdir(OUT_DIR, SECRET_DIR);
+  await mkdir(DEVNET_DIR, SECRET_DIR);
+  await mkdir(OPERATORS_DIR, SECRET_DIR);
   await writeFile(path.join(DEVNET_DIR, "genesis.json"), pretty(overview.genesis));
 
   const configs = { seed: seedNodeConfig() };
   const seedDir = path.join(DEVNET_DIR, seedNode.role);
-  await mkdir(seedDir, { recursive: true });
+  await mkdir(seedDir, SECRET_DIR);
   await writeFile(path.join(seedDir, "config.json"), pretty(configs.seed));
-  await writeFile(path.join(seedDir, "network-private-key"), seedNode.nodeKey.privateKey);
+  await writeFile(path.join(seedDir, "network-private-key"), seedNode.nodeKey.privateKey, SECRET_FILE);
 
   for (const role of roles) {
     const packageResponse = await request("/api/pillar/package", {}, role.userCookie);
-    await writeFile(path.join(OPERATORS_DIR, `${role.pillarName}-pillar-package.zip`), packageResponse.body);
+    await writeFile(path.join(OPERATORS_DIR, `${role.pillarName}-pillar-package.zip`), packageResponse.body, SECRET_FILE);
 
     const zip = await JSZip.loadAsync(packageResponse.body);
     const packageConfig = JSON.parse(await zip.file("config.json").async("string"));
@@ -350,10 +358,10 @@ async function main() {
     configs[role.role] = config;
 
     const roleDir = path.join(DEVNET_DIR, role.role);
-    await mkdir(path.join(roleDir, "wallet"), { recursive: true });
-    await writeFile(path.join(roleDir, "config.json"), pretty(config));
-    await writeFile(path.join(roleDir, "network-private-key"), role.nodeKey.privateKey);
-    await writeFile(path.join(roleDir, "wallet", "producer.json"), pretty(producerWallet));
+    await mkdir(path.join(roleDir, "wallet"), SECRET_DIR);
+    await writeFile(path.join(roleDir, "config.json"), pretty(config), SECRET_FILE);
+    await writeFile(path.join(roleDir, "network-private-key"), role.nodeKey.privateKey, SECRET_FILE);
+    await writeFile(path.join(roleDir, "wallet", "producer.json"), pretty(producerWallet), SECRET_FILE);
   }
 
   const genesisChecks = validateGenesis(overview.genesis, roles.map((role) => role.pillar));
@@ -380,8 +388,8 @@ ${roles
     environment:
       ZNND_ROLE: ${role.role}
     ports:
-      - "${role.httpPort}:35997"
-      - "${role.wsPort}:35998"
+      - "127.0.0.1:${role.httpPort}:35997"
+      - "127.0.0.1:${role.wsPort}:35998"
     volumes:
       - ${role.role}-data:/root/.znn
     networks:
@@ -403,7 +411,8 @@ ${roles.concat(seedNode).map((role) => `  ${role.role}-data:`).join("\n")}
   );
   await writeFile(
     path.join(OUT_DIR, "operator-logins.txt"),
-    roles.map((role) => `${role.username}\t${role.password}\t${BASE_URL}`).join("\n") + "\n"
+    roles.map((role) => `${role.username}\t${role.password}\t${BASE_URL}`).join("\n") + "\n",
+    SECRET_FILE
   );
   await writeFile(
     path.join(OUT_DIR, "summary.json"),

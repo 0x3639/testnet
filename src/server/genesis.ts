@@ -218,17 +218,31 @@ export function buildNodeConfig(
           Password: producerPassword ?? "<producer-password>"
         }
       : undefined,
-    RPC: {
-      EnableHTTP: true,
-      EnableWS: true,
-      HTTPHost: "0.0.0.0",
-      HTTPPort: 35997,
-      WSHost: "0.0.0.0",
-      WSPort: 35998,
-      HTTPCors: ["*"],
-      WSOrigins: ["*"],
-      Endpoints: ["ledger", "stats", "embedded", "subscribe"]
-    },
+    // Pillars only need RPC for the local bootstrap agent, so their RPC listens on loopback with no
+    // browser origins. Seed / non-producing nodes serve the explorer and faucet and stay public.
+    RPC: pillar
+      ? {
+          EnableHTTP: true,
+          EnableWS: true,
+          HTTPHost: "127.0.0.1",
+          HTTPPort: 35997,
+          WSHost: "127.0.0.1",
+          WSPort: 35998,
+          HTTPCors: [],
+          WSOrigins: [],
+          Endpoints: ["ledger", "stats", "embedded", "subscribe"]
+        }
+      : {
+          EnableHTTP: true,
+          EnableWS: true,
+          HTTPHost: "0.0.0.0",
+          HTTPPort: 35997,
+          WSHost: "0.0.0.0",
+          WSPort: 35998,
+          HTTPCors: ["*"],
+          WSOrigins: ["*"],
+          Endpoints: ["ledger", "stats", "embedded", "subscribe"]
+        },
     Net: {
       ListenHost: "0.0.0.0",
       ListenPort: 35995,
