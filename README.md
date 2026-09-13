@@ -21,6 +21,7 @@ The backend is Node/Express. The frontend is React/Vite and follows the dark, co
 - Public publish step for `/genesis.json`, `/config.json`, and `/node-plan.json`.
 - Operator bootstrap command that installs go-zenon with `hypercore-one/deployment`, then writes the node-specific genesis, config, producer files for pillars, or network private key for seed nodes.
 - Per-node status reporting from the bootstrap agent.
+- Release repository allowlist, immutable published releases pinned to exact commits, and node-side verification of the built `znnd` binary before it can start.
 - Admin user, pillar, and seed-node deletion.
 - A local four-node devnet generation script for validating the produced genesis/config artifacts.
 
@@ -82,7 +83,7 @@ npm run account -- create-user --username pillar-a --password "change-me"
 | `APP_SECRET` | none (required in production) | Encryption key for stored wallet passwords, node keys, and status tokens. |
 | `DATA_DIR` | `./data` | Location of `app-state.json`. Created with mode `0700`; the state file is written with mode `0600`. |
 | `PUBLIC_URL` | none | Fixed public origin (for example `https://testnet.example.com`) used in generated bootstrap scripts and manifests. When unset the origin is derived from the request. |
-| `TRUST_PROXY` | `loopback` | Express `trust proxy` setting. Controls which peers may set `X-Forwarded-*` (and therefore the client address used by login rate limiting). The compose files set `uniquelocal` because Caddy reaches the app over a private Docker network; any peer in the trusted range can forge forwarded addresses, so keep it as narrow as your topology allows. |
+| `TRUST_PROXY` | `loopback` | Express `trust proxy` setting. Controls which peers may set `X-Forwarded-*` (and therefore the client address used by login rate limiting). Both compose files set `uniquelocal` because the reverse proxy (the bundled Caddy, or Coolify's proxy) reaches the app over a private Docker network; any peer in the trusted range can forge forwarded addresses, so keep it as narrow as your topology allows. |
 | `COOKIE_SECURE` | `false` | Set to `true` when served over HTTPS so the session cookie is only sent over TLS. |
 | `ALLOWED_REPO_HOSTS` | `github.com` | Comma-separated hosts that release repositories may live on. |
 | `ALLOWED_REPOS` | the default go-zenon and deployment repositories | Comma-separated repository URLs an admin may publish (host compared case-insensitively, path exactly). Add forks here to allow them; set to `*` to allow any repository on an allowed host. |
@@ -118,7 +119,7 @@ DEPLOYMENT_REPO=https://github.com/hypercore-one/deployment.git
 DEPLOYMENT_REF=main
 ```
 
-After the app is running, admins can edit the go-zenon repo/ref, optional commit label, deployment repo, deployment ref, one-shot data wipe flag, and optional release apply time from the Settings panel. Saving these values only updates the draft settings. They do not reach `/node-plan.json` or authenticated bootstrap manifests until an admin clicks **Publish Release**. Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`.
+After the app is running, admins can edit the go-zenon repo/ref, deployment repo/ref, the optional commit pins, one-shot data wipe flag, and optional release apply time from the Settings panel. Saving these values only updates the draft settings. They do not reach `/node-plan.json` or authenticated bootstrap manifests until an admin clicks **Publish Release**, which resolves any empty commit pin to the ref's current commit so the published release is immutable. Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`.
 
 ## Standalone Docker
 
@@ -160,18 +161,38 @@ In Coolify:
 2. Click **New Resource** and choose **Docker Compose** from a **Git repository** (public repository, or a connected GitHub App for private ones).
 3. Repository: `https://github.com/0x3639/testnet.git`, branch `main`.
 4. Docker Compose location: `docker-compose.coolify.yml`.
-5. After Coolify loads the compose file, open the `app` service and set its **Domain** to the public URL, for example `https://testnet.zenon.info`.
+5. After Coolify loads the compose file, set the domain for the `app` service as described in [Set Up The Domain](#set-up-the-domain).
 6. Set the environment variables below.
 7. Click **Deploy**.
 
 Leave **Connect To Predefined Network** off. It is not needed, and keeping the resource on its own network means nothing except Coolify's proxy can reach the app or forge proxy headers.
+
+### Set Up The Domain
+
+The app listens on port `8787` inside the container, and Coolify's proxy routes a domain to port `80` unless the domain value says otherwise, so the port must be part of the domain value.
+
+1. Create a DNS `A` record (and `AAAA` if the server has IPv6) for the hostname, for example `testnet.zenon.info`, pointing at the Coolify server that runs this resource. Wait until it resolves.
+2. Make sure TCP ports `80` and `443` on that server reach Coolify's proxy; Let's Encrypt validation and the site itself use them.
+3. In the resource, open the `app` service and find the **Domains for app** field.
+4. Enter the domain with the `https://` scheme and the internal port suffix:
+
+   ```text
+   https://testnet.zenon.info:8787
+   ```
+
+   The `:8787` tells Coolify which container port to route to; the public site is still served on the standard HTTPS port. Using `https://` makes Coolify's proxy request and renew the TLS certificate automatically.
+5. Save, then deploy (or redeploy) the resource so the proxy picks up the route.
+
+For a quick test without DNS, leave the field empty and click **Generate Domain**: Coolify assigns a temporary `sslip.io` hostname (or one under the server's **Wildcard Domain** if configured). Replace it with the real hostname before inviting operators, because the generated bootstrap commands embed the public URL.
+
+The compose file declares Coolify's `SERVICE_URL_APP_8787` magic variable, so Coolify fills `SERVICE_URL_APP` with `https://<domain>` (no port) and the app uses it as `PUBLIC_URL`. After the first deploy, confirm the operator bootstrap command shown on an operator's page starts with the right `https://<domain>`; if it does not, set `PUBLIC_URL` explicitly in the environment variables and redeploy.
 
 ### Environment Variables
 
 Coolify shows every `${VARIABLE}` from the compose file in the resource's **Environment Variables** tab. Set:
 
 - `APP_SECRET`: required. A stable secret, for example `openssl rand -hex 32`. Never change it after operators register pillars; it encrypts stored wallet package secrets.
-- `PUBLIC_URL`: optional. Defaults to `SERVICE_URL_APP`, which Coolify fills with the domain set on the `app` service. Set it explicitly only if the public origin differs.
+- `PUBLIC_URL`: optional. Defaults to `SERVICE_URL_APP`, which Coolify fills from the domain set on the `app` service (see [Set Up The Domain](#set-up-the-domain)). Set it explicitly, for example `https://testnet.zenon.info`, if the public origin differs or the magic variable is not populated.
 - `TRUST_PROXY`: optional, defaults to `uniquelocal` so Coolify's proxy may set forwarded headers.
 - `TZ`: optional, defaults to `Etc/UTC`.
 - `GO_ZENON_REPO`, `GO_ZENON_REF`, `GO_ZENON_COMMIT`, `DEPLOYMENT_REPO`, `DEPLOYMENT_REF`, `DEPLOYMENT_COMMIT`: optional initial release defaults; see [Release Target Configuration](#release-target-configuration).
@@ -205,6 +226,16 @@ Then open `https://<domain>`, sign in as `admin`, create operator accounts, coll
 ### Updating
 
 Push to `main` and redeploy from Coolify (or enable automatic deployments on push). Keep the same persistent volume and the same `APP_SECRET`. The app stores state in the named volume `testnet-data` at `/app/data`; the container starts as root only long enough to fix that volume's ownership before dropping to the `node` user.
+
+### Migrating From Another Host
+
+To move an existing testnet builder to Coolify without losing registrations:
+
+1. Deploy the resource once so Coolify creates the `testnet-data` volume, then stop it.
+2. Copy the old `app-state.json` into the new volume (for example with `docker run --rm -v <old-volume>:/from -v <new-volume>:/to alpine cp /from/app-state.json /to/`).
+3. Set `APP_SECRET` in Coolify to exactly the old value; a different secret cannot decrypt the stored wallet passwords, node keys, and status tokens.
+4. Start the resource, sign in, and click **Publish Release** before operators re-run the bootstrap on their nodes: the current agent only accepts pinned releases.
+5. Have every operator re-run the bootstrap command shown on their operator page on the new site. Re-running it replaces the node's previous agent configuration so the node reports only to the new URL (see [Operator Bootstrap](#operator-bootstrap)). Until an operator does this, that node keeps reporting to the old URL and will not receive releases published from the new site.
 
 ## Admin Workflow
 
@@ -257,7 +288,7 @@ curl -fsSL "https://<domain>/api/bootstrap/install.sh" | sudo env ZNN_BOOTSTRAP_
 Run it on the node host. The script is intended for the same Linux/systemd style environment supported by `hypercore-one/deployment`.
 
 Re-running the command is safe and is how a node is moved to a new builder URL: the installer waits for any agent run in progress, removes the previous agent configuration (including any stray cron entries that would run the agent), installs the new one, and prints which URL it replaced. A node reports to exactly one builder, the one in the most recently run command. Node status tokens are stored in the builder's state, so after a migration that keeps `app-state.json` the same command and token keep working.
-In **Node Deployment**, the go-zenon repo and branch/tag choose the node source code that gets built. The deployment script repo and branch/tag choose the installer scripts that clone, build, install, and manage the service. The optional go-zenon commit pin is only needed when a release must be tied to an exact commit instead of the branch tip.
+In **Node Deployment**, the go-zenon repo and branch/tag choose the node source code that gets built. The deployment script repo and branch/tag choose the installer scripts that clone, build, install, and manage the service. Every published release is pinned to exact commits: leave a commit pin empty to pin the branch tip at publish time, or fill it in to publish a specific commit.
 For testnet operators, the bootstrap agent relaxes the deployment script CPU pre-flight minimum from 4 cores to 2 cores by default. Override it by adding `ZNN_DEPLOYMENT_MIN_CPU_CORES="<cores>"` to the bootstrap command if a stricter minimum is needed.
 The agent also changes the deployment script's total RAM check from a hard failure to a warning. A 4 GB VPS can report as `3GiB` after integer rounding, so the script will log the RAM finding and keep going. 4 GiB remains the recommended minimum for builds.
 The initial bootstrap run and the one-minute cron job share `/var/lock/znn-testnet-agent.lock`, so a long go-zenon build cannot be started twice. If `zenon.sh` reports `Failed to build binary`, check `/opt/zenon-deployment/.znnsh.log` for the underlying Go compiler error.
@@ -274,16 +305,17 @@ The bootstrap flow before a release is published:
 After **Publish Release**, the agent waits until `actions.applyAt` if that timestamp is present and in the future. When the apply time has arrived, the agent:
 
 1. Downloads the authenticated bootstrap manifest with the node token.
-2. Clones `DEPLOYMENT_REPO` at `DEPLOYMENT_REF`.
-3. Patches the deployment pre-flight CPU minimum to `ZNN_DEPLOYMENT_MIN_CPU_CORES`, default `2`, and changes the total RAM check to warning-only.
-4. Runs `./zenon.sh --deploy zenon "$GO_ZENON_REPO" "$GO_ZENON_REF"` to build and install go-zenon.
-5. Stops `go-zenon`.
-6. Wipes node data if the published node plan has `actions.wipeData: true`.
-7. Writes `/root/.znn/genesis.json`.
-8. Writes the node-specific `/root/.znn/config.json`.
-9. For pillars, writes `/root/.znn/wallet/producer.json` and `/root/.znn/wallet/producer-password.txt`.
-10. For managed seed nodes, writes `/root/.znn/network-private-key`.
-11. Restarts `go-zenon` and sends a status report.
+2. Records the pinned go-zenon commit for the systemd start-time verifier.
+3. Clones the deployment repository and checks out exactly the pinned deployment commit.
+4. Patches the deployment pre-flight CPU minimum to `ZNN_DEPLOYMENT_MIN_CPU_CORES`, default `2`, and changes the total RAM check to warning-only.
+5. Checks out go-zenon at the pinned commit locally and runs `./zenon.sh --deploy zenon` against that checkout to build and install `znnd`.
+6. Stops `go-zenon`, confirms the start-time verification hook is active, and verifies the built binary's embedded revision matches the pin (see [Release Repository Policy](#release-repository-policy)).
+7. Wipes node data if the published node plan has `actions.wipeData: true`.
+8. Writes `/root/.znn/genesis.json`.
+9. Writes the node-specific `/root/.znn/config.json`.
+10. For pillars, writes `/root/.znn/wallet/producer.json` and `/root/.znn/wallet/producer-password.txt`.
+11. For managed seed nodes, writes `/root/.znn/network-private-key`.
+12. Restarts `go-zenon` and sends a status report.
 
 The wipe action is controlled by **Wipe node data on next Publish Release** in admin Settings. It is one-shot: publishing a release snapshots the flag into `/node-plan.json`, then clears the draft checkbox. **Apply Release At (UTC)** is also one-shot: publishing snapshots it into `/node-plan.json`, then clears the draft field. The agent preserves `/root/.znn/wallet`, `/root/.znn/genesis.json`, `/root/.znn/config.json`, and `/root/.znn/network-private-key`, and removes other files/directories under `/root/.znn` before writing the published artifacts.
 
@@ -428,6 +460,7 @@ Most API endpoints require an authenticated session cookie.
 Public endpoints:
 
 - `GET /api/health`
+- `GET /api/public/stats`
 - `GET /genesis.json`
 - `GET /config.json`
 - `GET /node-plan.json`
