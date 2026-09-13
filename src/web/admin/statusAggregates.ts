@@ -2,6 +2,7 @@ import { formatAge, isOnline, nodeHealth, type HealthTone, type TelemetryNode } 
 
 export interface StatusTiles {
   momentumHeight?: number;
+  targetHeight?: number;
   maxLag: number;
   activeNodes: number;
   totalNodes: number;
@@ -29,12 +30,14 @@ const ACTIVE_WITHIN_MS = 5 * 60 * 1000;
 export function statusTiles(nodes: TelemetryNode[], now = Date.now()): StatusTiles {
   const reports = nodes.map((node) => node.nodeStatus?.latest).filter((latest): latest is NonNullable<typeof latest> => Boolean(latest));
   const heights = reports.map((r) => r.sync?.currentHeight).filter((h): h is number => typeof h === "number");
+  const targetHeights = reports.map((r) => r.sync?.targetHeight).filter((h): h is number => typeof h === "number");
   const lags = reports
     .map((r) => (typeof r.sync?.currentHeight === "number" && typeof r.sync.targetHeight === "number" ? Math.max(0, r.sync.targetHeight - r.sync.currentHeight) : 0));
   const peers = reports.map((r) => r.network?.peerCount).filter((p): p is number => typeof p === "number");
   const pillars = nodes.filter((node) => node.nodeType === "pillar");
   return {
     momentumHeight: heights.length ? Math.max(...heights) : undefined,
+    targetHeight: targetHeights.length ? Math.max(...targetHeights) : undefined,
     maxLag: lags.length ? Math.max(...lags) : 0,
     activeNodes: reports.filter((r) => now - Date.parse(r.receivedAt) < ACTIVE_WITHIN_MS).length,
     totalNodes: nodes.length,

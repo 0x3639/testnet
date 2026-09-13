@@ -31,6 +31,18 @@ describe("nodeHealth", () => {
     assert.equal(nodeHealth(node({ sync: { state: 2, currentHeight: 10, targetHeight: 100 } }), NOW).label, "Lagging");
   });
 
+  it("reports Clock skew as warn at 2 minutes off and bad at 6 minutes off", () => {
+    const warn = node({ receivedAt: ago(10), reportedAt: ago(10 + 2 * 60) });
+    assert.deepEqual(nodeHealth(warn, NOW), { label: "Clock skew", tone: "warn" });
+    const bad = node({ receivedAt: ago(10), reportedAt: ago(10 + 6 * 60) });
+    assert.deepEqual(nodeHealth(bad, NOW), { label: "Clock skew", tone: "bad" });
+  });
+
+  it("reports Waiting when the node is waiting for a published release", () => {
+    const n = node({ node: { waitingForRelease: true } });
+    assert.deepEqual(nodeHealth(n, NOW), { label: "Waiting", tone: "warn" });
+  });
+
   it("uses the supplied clock", () => {
     const n = node({ receivedAt: ago(10), sync: { state: 2 } });
     assert.equal(nodeHealth(n, NOW).label, "Online");

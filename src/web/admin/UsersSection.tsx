@@ -13,7 +13,7 @@ export interface CreateUserInput {
   role: Role;
 }
 
-interface CreatedCredential {
+export interface CreatedCredential {
   username: string;
   password: string;
   url: string;
@@ -29,12 +29,16 @@ Password: ${credential.password}`;
 export function UsersSection({
   users,
   currentUser,
+  createdCredential,
+  onCredentialChange,
   onCreate,
   onResetPassword,
   onDeleteUser
 }: {
   users: ManagedUser[];
   currentUser: AuthUser;
+  createdCredential: CreatedCredential | null;
+  onCredentialChange: (credential: CreatedCredential | null) => void;
   onCreate: (input: CreateUserInput) => Promise<void>;
   onResetPassword: (userId: string, password: string) => Promise<void>;
   onDeleteUser: (user: ManagedUser) => Promise<void>;
@@ -47,20 +51,19 @@ export function UsersSection({
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [createdCredential, setCreatedCredential] = useState<CreatedCredential | null>(null);
 
   async function createUser(event: FormEvent) {
     event.preventDefault();
     setBusy("create");
     setError("");
     setSuccess("");
-    setCreatedCredential(null);
+    onCredentialChange(null);
     try {
       const createdUsername = username;
       const createdPassword = password;
       await onCreate({ username, password, role });
       setSuccess(`Created ${createdUsername}`);
-      setCreatedCredential({
+      onCredentialChange({
         username: createdUsername,
         password: createdPassword,
         url: loginUrl()
@@ -104,7 +107,7 @@ export function UsersSection({
     setBusy(`delete:${user.id}`);
     setError("");
     setSuccess("");
-    setCreatedCredential(null);
+    onCredentialChange(null);
     try {
       await onDeleteUser(user);
       setSuccess(`Deleted ${user.username}`);
@@ -165,9 +168,14 @@ export function UsersSection({
               <span>Password</span>
               <strong className="mono">{createdCredential.password}</strong>
             </div>
-            <Button variant="secondary" icon={<Copy size={18} />} onClick={() => copy(credentialText(createdCredential))}>
-              Copy Login
-            </Button>
+            <div className="toolbar compactToolbar">
+              <Button variant="secondary" icon={<Copy size={18} />} onClick={() => copy(credentialText(createdCredential))}>
+                Copy Login
+              </Button>
+              <Button variant="ghost" onClick={() => onCredentialChange(null)}>
+                Dismiss
+              </Button>
+            </div>
           </div>
         ) : null}
         <div className="tableCaption mono mutedText">

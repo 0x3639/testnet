@@ -26,7 +26,7 @@ export function LaunchBar({ playbook, onPlaybookChange, evaluation, onNavigate }
             <button type="button" className="stepperButton" title={step.label} onClick={() => onNavigate(step.section)}>
               <StepCircle state={step.state} index={step.index} />
             </button>
-            {step.index < evaluation.total - 1 ? <span className={`stepperLine${step.state === "done" ? " done" : ""}`} /> : null}
+            {step.index < evaluation.steps.length - 1 ? <span className={`stepperLine${step.state === "done" ? " done" : ""}`} /> : null}
           </li>
         ))}
       </ol>

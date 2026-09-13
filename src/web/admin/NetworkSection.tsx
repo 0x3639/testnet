@@ -92,7 +92,7 @@ export function NetworkSection({
         description="Draft settings. Nothing reaches nodes until you Save here, then Finalize and Publish on the Release page."
         aside={settingsDirty ? <span className="statusPill warn">Unsaved changes</span> : <span className="mono mutedText">Saved</span>}
       />
-      <div className="networkForm">
+      <div className="networkPage">
         <form id="networkSettingsForm" className="networkForm" onSubmit={submit}>
           <section className="panel stack">
             <div className="panelHeader">

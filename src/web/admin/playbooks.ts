@@ -210,7 +210,7 @@ export function evaluatePlaybook(id: PlaybookId, input: PlaybookInput): Playbook
     currentIndex,
     current: currentIndex >= 0 ? steps[currentIndex] : undefined,
     doneCount,
-    total: steps.length,
+    total: steps.filter((step) => !step.skipped).length,
     complete: currentIndex < 0
   };
 }

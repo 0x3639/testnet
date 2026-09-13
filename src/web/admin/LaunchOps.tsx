@@ -27,7 +27,12 @@ export function LaunchOps({ overview, nodes, settingsDirty, evaluation, onNaviga
       <SectionHeader
         kicker={`Testnet-${overview.settings.chainIdentifier} · genesis ${formatUtc(genesis)}`}
         title="Launch Ops"
-        aside={<span className="mono mutedText"><span className={`liveDot${evaluation.complete ? " on" : ""}`} /> {evaluation.doneCount} of {evaluation.total} steps done</span>}
+        aside={
+          <span className="mono mutedText">
+            <span className={`liveDot${evaluation.complete ? " on" : ""}`} />{" "}
+            {evaluation.complete ? "All steps complete" : `${evaluation.doneCount} of ${evaluation.total} steps done`}
+          </span>
+        }
       />
       <div className="sectionCards">
         <button type="button" className="sectionCard" onClick={() => onNavigate("users")}>

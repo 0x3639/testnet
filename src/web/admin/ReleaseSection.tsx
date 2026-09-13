@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import type { AdminOverview, PublishedArtifactsInfo } from "../../shared/types";
 import { copy, download, formatUtc, publicUrl } from "../shared/format";
 import { Button } from "../shared/ui";
+import { StepCircle } from "./LaunchBar";
 import { SectionHeader } from "./SectionHeader";
 import { Tooltip } from "./Tooltip";
 import { TIPS } from "./tooltips";
@@ -71,7 +72,6 @@ export function ReleaseSection({
   settingsDirty,
   wipeOnPublish,
   publishing,
-  error,
   onFinalize,
   onPublish
 }: {
@@ -79,7 +79,6 @@ export function ReleaseSection({
   settingsDirty: boolean;
   wipeOnPublish: boolean;
   publishing: boolean;
-  error: string;
   onFinalize: () => Promise<void>;
   onPublish: () => Promise<void>;
 }) {
@@ -93,10 +92,9 @@ export function ReleaseSection({
   return (
     <>
       <SectionHeader title="Release" description="Three actions, in order. Each unlocks the next." />
-      {error ? <div className="alert">{error}</div> : null}
       <section className="panel releaseCard">
         <div className="releaseCardHeader">
-          <span className="stepCircle done">1</span>
+          <StepCircle state="done" index={0} />
           <div>
             <h2>Review artifacts<Tooltip text={TIPS["release.review"]} /></h2>
             <p className="mutedText">Check the generated genesis.json and config.json.</p>
@@ -122,7 +120,7 @@ export function ReleaseSection({
       </section>
       <section className="panel releaseCard">
         <div className="releaseCardHeader">
-          <span className={`stepCircle ${finalized ? "done" : "current"}`}>{finalized ? "✓" : "2"}</span>
+          <StepCircle state={finalized ? "done" : "current"} index={1} />
           <div>
             <h2>Finalize genesis<Tooltip text={TIPS["release.finalize"]} /></h2>
             <p className="mutedText">
@@ -138,7 +136,7 @@ export function ReleaseSection({
       </section>
       <section className="panel releaseCard">
         <div className="releaseCardHeader">
-          <span className={`stepCircle ${published ? "done" : finalized ? "current" : "pending"}`}>{published ? "✓" : "3"}</span>
+          <StepCircle state={published ? "done" : finalized ? "current" : "pending"} index={2} />
           <div>
             <h2>Publish release<Tooltip text={TIPS["release.publish"]} /></h2>
             <p className="mutedText">

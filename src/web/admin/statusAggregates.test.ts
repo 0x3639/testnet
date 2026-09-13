@@ -22,6 +22,7 @@ describe("statusTiles", () => {
   it("aggregates heights, active nodes, producing pillars, and peers", () => {
     const tiles = statusTiles(fleet, NOW);
     assert.equal(tiles.momentumHeight, 184220);
+    assert.equal(tiles.targetHeight, 184220);
     assert.equal(tiles.maxLag, 20316);
     assert.equal(tiles.activeNodes, 4);
     assert.equal(tiles.totalNodes, 5);
@@ -55,6 +56,19 @@ describe("attentionItems and healthCounts", () => {
     assert.equal(items[0].message, "Built znnd commit abc does not match");
     assert.match(items[1].message, /Has not reported yet/);
     assert.match(items[2].message, /3 errors in the last minute/);
+  });
+
+  it("describes service down, clock skew, lagging, and waiting nodes", () => {
+    const items = attentionItems([
+      node("d", "pillar", { node: { serviceActive: false } }),
+      node("e", "pillar", { receivedAt: ago(10), reportedAt: ago(10 + 2 * 60) }),
+      node("f", "pillar", { sync: { state: 2, currentHeight: 10, targetHeight: 100 } }),
+      node("g", "pillar", { node: { waitingForRelease: true } })
+    ], NOW);
+    assert.equal(items[0].message, "Service is not running.");
+    assert.match(items[1].message, /Clock is \d+ s off/);
+    assert.match(items[2].message, /90 momentums behind/);
+    assert.equal(items[3].message, "Waiting for a published release.");
   });
 
   it("counts nodes per health label", () => {

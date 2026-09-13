@@ -40,7 +40,17 @@ export function StatusView({ overview, nodes, refresh, refreshState, lastUpdated
         aside={<><span className="mono mutedText">Auto-refreshes every 30s · last update {secondsAgo}s ago</span><RefreshButton refresh={refresh} state={refreshState} /></>}
       />
       <div className="statTiles statusTiles">
-        <StatTile label="Momentum height" value={tiles.momentumHeight?.toLocaleString("en-US") ?? "—"} hint={tiles.momentumHeight === undefined ? undefined : tiles.maxLag === 0 ? "in sync" : `${tiles.maxLag.toLocaleString("en-US")} behind`} />
+        <StatTile
+          label="Momentum height"
+          value={tiles.momentumHeight?.toLocaleString("en-US") ?? "—"}
+          hint={
+            tiles.momentumHeight === undefined
+              ? undefined
+              : tiles.maxLag === 0
+                ? `target ${(tiles.targetHeight ?? tiles.momentumHeight).toLocaleString("en-US")} · in sync`
+                : `${tiles.maxLag.toLocaleString("en-US")} behind`
+          }
+        />
         <StatTile label="Active nodes" value={`${tiles.activeNodes} / ${tiles.totalNodes}`} hint="reported in the last 5 min" />
         <StatTile label="Pillars producing" value={`${tiles.producingPillars} / ${tiles.totalPillars}`} />
         <StatTile label="Avg peers" value={tiles.avgPeers === undefined ? "—" : tiles.avgPeers.toFixed(1)} />

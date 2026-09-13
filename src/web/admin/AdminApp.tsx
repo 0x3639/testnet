@@ -21,7 +21,7 @@ import { StatusView } from "./StatusView";
 import { nodeHealth, telemetryNodes } from "./telemetry";
 import { useHashSection } from "./useHashSection";
 import { usePlaybook } from "./usePlaybook";
-import { UsersSection, type CreateUserInput } from "./UsersSection";
+import { UsersSection, type CreatedCredential, type CreateUserInput } from "./UsersSection";
 
 export function AdminApp({
   session,
@@ -51,6 +51,7 @@ export function AdminApp({
   const settingsDirty = useMemo(() => settingsKey(settingsDraft) !== settingsKey(settingsBase), [settingsDraft, settingsBase]);
   const [adminError, setAdminError] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [createdCredential, setCreatedCredential] = useState<CreatedCredential | null>(null);
   const [playbook, setPlaybook] = usePlaybook();
   const evaluation = useMemo(
     () => evaluatePlaybook(playbook, { overview: session, draft: settingsDraft, settingsDirty }),
@@ -220,6 +221,8 @@ export function AdminApp({
           <UsersSection
             users={session.users}
             currentUser={session.user}
+            createdCredential={createdCredential}
+            onCredentialChange={setCreatedCredential}
             onCreate={createUser}
             onResetPassword={resetUserPassword}
             onDeleteUser={deleteUser}
@@ -252,7 +255,6 @@ export function AdminApp({
             settingsDirty={settingsDirty}
             wipeOnPublish={settingsDraft.wipeDataOnPublish}
             publishing={publishing}
-            error=""
             onFinalize={finalize}
             onPublish={publish}
           />

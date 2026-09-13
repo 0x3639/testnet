@@ -90,6 +90,18 @@ describe("launch playbook", () => {
     assert.equal(e.steps[5].state, "pending");
   });
 
+  it("keeps 'Configure network' not done with a past genesis time and no finalize, until logins and nodes are done", () => {
+    const o = overview({
+      users: [{ id: "a", username: "admin", role: "admin", createdAt: "" }, { id: "u", username: "op", role: "user", createdAt: "" }],
+      pillars: [pillar("p1", false), pillar("p2", false)]
+    });
+    const pastDraft = { ...o.settings, genesisTimestampSec: Math.floor(NOW / 1000) - HOUR };
+    const e = evaluatePlaybook("launch", input(o, { draft: pastDraft }));
+    assert.equal(e.steps[0].state, "done");
+    assert.equal(e.steps[1].state, "done");
+    assert.equal(e.steps[2].state, "current");
+  });
+
   it("completes when everything is published and all nodes are online", () => {
     const o = overview({
       users: [{ id: "a", username: "admin", role: "admin", createdAt: "" }, { id: "u", username: "op", role: "user", createdAt: "" }],
@@ -141,6 +153,23 @@ describe("change playbook", () => {
     assert.equal(e.steps[0].state, "current");
     assert.equal(e.steps[1].optional, true);
     assert.equal(e.steps[1].skipped, true);
+  });
+
+  it("marks the optional apply-time step done, not skipped, once releaseApplyAtSec is set", () => {
+    const o = overview();
+    const draft = { ...o.settings, releaseApplyAtSec: Math.floor(NOW / 1000) + HOUR };
+    const e = evaluatePlaybook("change", input(o, { draft }));
+    assert.equal(e.steps[0].state, "done");
+    assert.equal(e.steps[1].skipped, false);
+    assert.equal(e.steps[1].state, "done");
+  });
+
+  it("with nothing published, treats edit as done, skips apply-time, and points at save when dirty", () => {
+    const o = overview();
+    const e = evaluatePlaybook("change", input(o, { settingsDirty: true }));
+    assert.equal(e.steps[0].state, "done");
+    assert.equal(e.steps[1].skipped, true);
+    assert.equal(e.steps[2].state, "current");
   });
 
   it("walks edit -> save -> publish -> nodes apply, then returns to idle", () => {
