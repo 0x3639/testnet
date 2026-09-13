@@ -5,6 +5,8 @@ import type { RefreshState } from "../shared/api";
 import { copy, download } from "../shared/format";
 import { AddressValue, Button, RefreshButton } from "../shared/ui";
 import { SectionHeader } from "./SectionHeader";
+import { Tooltip } from "./Tooltip";
+import { TIPS } from "./tooltips";
 import {
   formatAge,
   formatClockSkew,
@@ -40,7 +42,7 @@ function NodeStatusPanel({
       <div className="panelHeader">
         <div>
           <span className="ledger">Telemetry</span>
-          <h2>Node Status</h2>
+          <h2>Node Status<Tooltip text={TIPS["nodes.health"]} /></h2>
         </div>
         <div className="toolbar compactToolbar">
           <Button variant="ghost" onClick={onToggleDetailed}>
@@ -207,6 +209,7 @@ export function NodesSection({
               <span className="ledger">Pillars</span>
               <h2>
                 Pillars · {overview.pillars.length} of {overview.settings.expectedPillars}
+                <Tooltip text={TIPS["nodes.pillars"]} />
               </h2>
             </div>
             <Button variant="secondary" icon={<KeyRound size={18} />} onClick={() => download("/api/admin/spork-package.zip")}>
@@ -274,7 +277,7 @@ export function NodesSection({
           <div className="panelHeader">
             <div>
               <span className="ledger">Seed nodes</span>
-              <h2>Seed nodes · {overview.seedNodes.length}</h2>
+              <h2>Seed nodes · {overview.seedNodes.length}<Tooltip text={TIPS["nodes.seeds"]} /></h2>
             </div>
           </div>
           <div className="tableWrap">

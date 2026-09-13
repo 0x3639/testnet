@@ -7,6 +7,8 @@ import { SectionHeader } from "./SectionHeader";
 import type { SectionId } from "./sections";
 import { attentionItems, statusTiles } from "./statusAggregates";
 import { formatAge, nodeHealth, shortCommit, type TelemetryNode } from "./telemetry";
+import { Tooltip } from "./Tooltip";
+import { TIPS } from "./tooltips";
 
 export function StatusView({ overview, nodes, refresh, refreshState, lastUpdatedAt, onNavigate }: {
   overview: AdminOverview;
@@ -46,7 +48,7 @@ export function StatusView({ overview, nodes, refresh, refreshState, lastUpdated
         <StatTile label="Genesis" value={formatUtc(new Date(overview.settings.genesisTimestampSec * 1000).toISOString())} hint={`chain ${overview.settings.chainIdentifier}`} />
       </div>
       <section className="panel">
-        <div className="panelHeader"><div><span className="ledger">Alerts</span><h2>Needs attention</h2></div></div>
+        <div className="panelHeader"><div><span className="ledger">Alerts</span><h2>Needs attention<Tooltip text={TIPS["status.attention"]} /></h2></div></div>
         {attention.length ? (
           <div className="attentionList">
             {attention.map((item) => (
@@ -63,7 +65,7 @@ export function StatusView({ overview, nodes, refresh, refreshState, lastUpdated
       </section>
       <div className="statusColumns">
         <section className="panel">
-          <div className="panelHeader"><div><span className="ledger">Telemetry</span><h2>Node health</h2></div></div>
+          <div className="panelHeader"><div><span className="ledger">Telemetry</span><h2>Node health<Tooltip text={TIPS["status.health"]} /></h2></div></div>
           <div className="healthList">
             {nodes.map((node) => {
               const health = nodeHealth(node, now);
@@ -81,7 +83,7 @@ export function StatusView({ overview, nodes, refresh, refreshState, lastUpdated
           <div className="toolbar"><Button variant="secondary" onClick={() => onNavigate("nodes")}>Full telemetry</Button></div>
         </section>
         <section className="panel">
-          <div className="panelHeader"><div><span className="ledger">Release</span><h2>Current release</h2></div></div>
+          <div className="panelHeader"><div><span className="ledger">Release</span><h2>Current release<Tooltip text={TIPS["status.release"]} /></h2></div></div>
           {published && release ? (
             <>
               <div className="kvRows">

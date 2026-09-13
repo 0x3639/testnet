@@ -1671,3 +1671,53 @@ pre {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.tip {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  border: 1px solid #3d4442;
+  border-radius: 50%;
+  color: var(--muted);
+  background: transparent;
+  padding: 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: help;
+}
+
+.tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+  width: max-content;
+  max-width: 270px;
+  border: 1px solid #3d4442;
+  border-radius: var(--radius);
+  color: #e6ece9;
+  background: #0e100f;
+  padding: 9px 11px;
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.tip:hover::after,
+.tip:focus-visible::after {
+  opacity: 1;
+}

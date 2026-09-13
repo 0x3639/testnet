@@ -4,6 +4,8 @@ import type { AuthUser, ManagedUser, Role } from "../../shared/types";
 import { copy, generatePassword, loginUrl } from "../shared/format";
 import { Button } from "../shared/ui";
 import { SectionHeader } from "./SectionHeader";
+import { Tooltip } from "./Tooltip";
+import { TIPS } from "./tooltips";
 
 export interface CreateUserInput {
   username: string;
@@ -123,7 +125,7 @@ export function UsersSection({
         <div className="panelHeader">
           <div>
             <span className="ledger">Access</span>
-            <h2>Add a login</h2>
+            <h2>Add a login<Tooltip text={TIPS["users.add"]} /></h2>
           </div>
         </div>
         <form className="userCreateGrid" onSubmit={createUser}>
@@ -141,7 +143,7 @@ export function UsersSection({
             </div>
           </label>
           <label>
-            <span>Role</span>
+            <span>Role<Tooltip text={TIPS["users.role"]} /></span>
             <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
               <option value="user">Operator</option>
               <option value="admin">Admin</option>

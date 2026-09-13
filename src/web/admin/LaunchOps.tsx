@@ -5,6 +5,8 @@ import type { PlaybookEvaluation } from "./playbooks";
 import { SECTION_LABELS, type SectionId } from "./sections";
 import { SectionHeader } from "./SectionHeader";
 import { isOnline, nodeHealth, type TelemetryNode } from "./telemetry";
+import { Tooltip } from "./Tooltip";
+import { READINESS_TIPS, TIPS } from "./tooltips";
 
 export function LaunchOps({ overview, nodes, settingsDirty, evaluation, onNavigate }: {
   overview: AdminOverview;
@@ -50,7 +52,7 @@ export function LaunchOps({ overview, nodes, settingsDirty, evaluation, onNaviga
         </button>
       </div>
       <section className="panel">
-        <div className="panelHeader"><div><span className="ledger">Playbook</span><h2>{evaluation.playbook.title}</h2></div></div>
+        <div className="panelHeader"><div><span className="ledger">Playbook</span><h2>{evaluation.playbook.title}<Tooltip text={TIPS["launch.checklist"]} /></h2></div></div>
         <div className="checklist">
           {evaluation.steps.map((step) => (
             <button key={step.id} type="button" className={`checklistRow ${step.state}`} onClick={() => onNavigate(step.section)}>
@@ -66,7 +68,7 @@ export function LaunchOps({ overview, nodes, settingsDirty, evaluation, onNaviga
         {overview.readiness.map((check) => (
           <div key={check.label} className="readinessTile">
             <span className={`readinessDot${check.ok ? " ok" : ""}`} />
-            <div><strong>{check.label}</strong><small className="mutedText">{check.detail}</small></div>
+            <div><strong>{check.label}{READINESS_TIPS[check.label] ? <Tooltip text={READINESS_TIPS[check.label]} /> : null}</strong><small className="mutedText">{check.detail}</small></div>
           </div>
         ))}
       </div>

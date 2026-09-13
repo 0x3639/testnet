@@ -16,6 +16,8 @@ import {
 } from "../shared/format";
 import { Button } from "../shared/ui";
 import { SectionHeader } from "./SectionHeader";
+import { Tooltip } from "./Tooltip";
+import { TIPS } from "./tooltips";
 
 export interface ProbeSeedInput {
   ip: string;
@@ -96,7 +98,7 @@ export function NetworkSection({
             <div className="panelHeader">
               <div>
                 <span className="ledger">Genesis</span>
-                <h2>Genesis basics</h2>
+                <h2>Genesis basics<Tooltip text={TIPS["network.genesis"]} /></h2>
               </div>
             </div>
             <div className="formGrid">
@@ -110,7 +112,7 @@ export function NetworkSection({
                 />
               </label>
               <label>
-                <span>Genesis Start (UTC)</span>
+                <span>Genesis Start (UTC)<Tooltip text={TIPS["network.genesisTime"]} /></span>
                 <input
                   className="mono"
                   type="datetime-local"
@@ -122,7 +124,7 @@ export function NetworkSection({
                 />
               </label>
               <label>
-                <span>Minimum Pillars</span>
+                <span>Minimum Pillars<Tooltip text={TIPS["network.minPillars"]} /></span>
                 <input
                   className="mono"
                   type="number"
@@ -150,7 +152,7 @@ export function NetworkSection({
             <div className="panelHeader">
               <div>
                 <span className="ledger">Release</span>
-                <h2>Release target</h2>
+                <h2>Release target<Tooltip text={TIPS["network.release"]} /></h2>
               </div>
             </div>
             <div className="formGrid">
@@ -172,7 +174,7 @@ export function NetworkSection({
                 />
               </label>
               <label>
-                <span>go-zenon Commit Pin</span>
+                <span>go-zenon Commit Pin<Tooltip text={TIPS["network.commitPin"]} /></span>
                 <input
                   className="mono"
                   value={draft.goZenonCommit ?? ""}
@@ -182,7 +184,7 @@ export function NetworkSection({
                 <small>Full 40-character hash, or leave empty to pin the ref's current commit when you publish. Nodes refuse to start a binary whose embedded revision differs.</small>
               </label>
               <label>
-                <span>Deployment Commit Pin</span>
+                <span>Deployment Commit Pin<Tooltip text={TIPS["network.commitPin"]} /></span>
                 <input
                   className="mono"
                   value={draft.deploymentCommit ?? ""}
@@ -210,7 +212,7 @@ export function NetworkSection({
               <small>{repoPolicyHint(repoPolicy)}</small>
             </label>
             <label>
-              <span>Apply Release At (UTC)</span>
+              <span>Apply Release At (UTC)<Tooltip text={TIPS["network.applyAt"]} /></span>
               <input
                 className="mono"
                 type="datetime-local"
@@ -249,7 +251,7 @@ export function NetworkSection({
             <div className="panelHeader">
               <div>
                 <span className="ledger">Peers</span>
-                <h2>Seeders &amp; bootstrap peers</h2>
+                <h2>Seeders &amp; bootstrap peers<Tooltip text={TIPS["network.seeders"]} /></h2>
               </div>
             </div>
             <div className="formGrid">
@@ -411,7 +413,7 @@ function GenesisSporkEditor({
       <div className="panelHeader">
         <div>
           <span className="ledger">Genesis</span>
-          <h2>Sporks</h2>
+          <h2>Sporks<Tooltip text={TIPS["network.sporks"]} /></h2>
         </div>
         <div className="toolbar compactToolbar">
           <Button variant="secondary" icon={<Plus size={18} />} onClick={addSpork}>
@@ -537,7 +539,7 @@ function GenesisFundingEditor({
       <div className="panelHeader">
         <div>
           <span className="ledger">Genesis</span>
-          <h2>Funded addresses</h2>
+          <h2>Funded addresses<Tooltip text={TIPS["network.funds"]} /></h2>
         </div>
         <div className="toolbar compactToolbar">
           <Button variant="secondary" icon={<Plus size={18} />} onClick={addFund}>

@@ -4,6 +4,8 @@ import type { AdminOverview, PublishedArtifactsInfo } from "../../shared/types";
 import { copy, download, formatUtc, publicUrl } from "../shared/format";
 import { Button } from "../shared/ui";
 import { SectionHeader } from "./SectionHeader";
+import { Tooltip } from "./Tooltip";
+import { TIPS } from "./tooltips";
 
 function PublishedArtifacts({ published }: { published: PublishedArtifactsInfo }) {
   const genesisUrl = publicUrl(published.genesisPath);
@@ -96,7 +98,7 @@ export function ReleaseSection({
         <div className="releaseCardHeader">
           <span className="stepCircle done">1</span>
           <div>
-            <h2>Review artifacts</h2>
+            <h2>Review artifacts<Tooltip text={TIPS["release.review"]} /></h2>
             <p className="mutedText">Check the generated genesis.json and config.json.</p>
           </div>
           <div className="toolbar compactToolbar">
@@ -122,7 +124,7 @@ export function ReleaseSection({
         <div className="releaseCardHeader">
           <span className={`stepCircle ${finalized ? "done" : "current"}`}>{finalized ? "✓" : "2"}</span>
           <div>
-            <h2>Finalize genesis</h2>
+            <h2>Finalize genesis<Tooltip text={TIPS["release.finalize"]} /></h2>
             <p className="mutedText">
               {overview.finalizedAt
                 ? `Finalized ${new Date(overview.finalizedAt).toLocaleString()}`
@@ -138,7 +140,7 @@ export function ReleaseSection({
         <div className="releaseCardHeader">
           <span className={`stepCircle ${published ? "done" : finalized ? "current" : "pending"}`}>{published ? "✓" : "3"}</span>
           <div>
-            <h2>Publish release</h2>
+            <h2>Publish release<Tooltip text={TIPS["release.publish"]} /></h2>
             <p className="mutedText">
               {finalized
                 ? "Makes the artifacts public and instructs every bootstrapped node to install this release."
@@ -151,6 +153,7 @@ export function ReleaseSection({
         </div>
         <div className={`wipeBanner${wipeOnPublish ? " danger" : ""}`}>
           Wipe node data on publish: <strong>{wipeOnPublish ? "on" : "off"}</strong>
+          <Tooltip text={TIPS["release.wipe"]} />
         </div>
       </section>
       <section className="panel">
