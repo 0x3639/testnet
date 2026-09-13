@@ -235,6 +235,7 @@ To move an existing testnet builder to Coolify without losing registrations:
 2. Copy the old `app-state.json` into the new volume (for example with `docker run --rm -v <old-volume>:/from -v <new-volume>:/to alpine cp /from/app-state.json /to/`).
 3. Set `APP_SECRET` in Coolify to exactly the old value; a different secret cannot decrypt the stored wallet passwords, node keys, and status tokens.
 4. Start the resource, sign in, and click **Publish Release** before operators re-run the bootstrap on their nodes: the current agent only accepts pinned releases.
+5. Have every operator re-run the bootstrap command shown on their operator page on the new site. Re-running it replaces the node's previous agent configuration so the node reports only to the new URL (see [Operator Bootstrap](#operator-bootstrap)). Until an operator does this, that node keeps reporting to the old URL and will not receive releases published from the new site.
 
 ## Admin Workflow
 
