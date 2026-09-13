@@ -6,12 +6,12 @@ import { z } from "zod";
 import { clearSessionCookie, login, logout, requireAuth, sessionTokenFromRequest, setSessionCookie, type AuthedRequest } from "./auth.js";
 import { createAccount, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, resetAccountPassword } from "./accounts.js";
 import { decryptText, encryptText, randomId, sha256 } from "./crypto.js";
-import { buildGenesis, buildNodeConfig, readiness, toPublicPillar } from "./genesis.js";
+import { buildGenesis, buildNodeConfig, finalizeBlockers, readiness, toPublicPillar } from "./genesis.js";
 import { buildPillarPackage, buildSeedNodePackage, buildSporkPackage } from "./packages.js";
 import { enodeFromPublicKey, multiaddrFromEnode, multiaddrFromPublicKey } from "./libp2p.js";
 import { bootstrapInstallScript } from "./bootstrap-script.js";
 import { resolveGitRef } from "./git-refs.js";
-import { publishInputsKey, settingsSnapshot } from "./settings.js";
+import { genesisSettingsKey, publishInputsKey, settingsSnapshot } from "./settings.js";
 import { AttemptLimiter } from "./rate-limit.js";
 import { checkCommit, checkGitRef, checkRepoUrl, loadRepoPolicy, redactUrl, releasePolicyErrors } from "./repo-policy.js";
 import { isPublicIp, probeSeedNode, validateSeedNodeIp } from "./seeders.js";
@@ -484,20 +484,6 @@ function publishedInfo(published?: PublishedArtifacts): PublishedArtifactsInfo |
   };
 }
 
-
-function genesisSettingsKey(settings: NetworkSettings): string {
-  return JSON.stringify({
-    chainIdentifier: settings.chainIdentifier,
-    extraData: settings.extraData,
-    expectedPillars: settings.expectedPillars,
-    minPillars: settings.minPillars,
-    genesisTimestampSec: settings.genesisTimestampSec,
-    seeders: settings.seeders,
-    bootstrapPeers: settings.bootstrapPeers,
-    sporks: settings.sporks,
-    genesisFunds: settings.genesisFunds
-  });
-}
 
 function normalizePublicUrl(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -1289,15 +1275,25 @@ async function main() {
   });
 
   app.post("/api/admin/finalize", requireAuth("admin"), async (_request, response) => {
-    const result = await updateState((state) => {
-      const genesis = buildGenesis(state.settings, state.pillars);
-      state.finalizedGenesis = {
-        genesis,
-        finalizedAt: new Date().toISOString()
-      };
-      return state.finalizedGenesis;
-    });
-    response.json(result);
+    try {
+      const result = await updateState((state) => {
+        const blockers = finalizeBlockers(state);
+        if (blockers.length) throw new PublishError(400, `Cannot finalize: ${blockers.join("; ")}`);
+        const genesis = buildGenesis(state.settings, state.pillars);
+        state.finalizedGenesis = {
+          genesis,
+          finalizedAt: new Date().toISOString()
+        };
+        return state.finalizedGenesis;
+      });
+      response.json(result);
+    } catch (error: unknown) {
+      if (error instanceof PublishError) {
+        response.status(error.status).json({ error: error.message });
+        return;
+      }
+      throw error;
+    }
   });
 
   app.post("/api/admin/publish", requireAuth("admin"), async (_request, response) => {
@@ -1340,6 +1336,11 @@ async function main() {
           throw new PublishError(409, "Settings or registrations changed while publishing; review them and publish again");
         }
 
+        if (!state.finalizedGenesis) {
+          // Publishing without an explicit finalize finalizes implicitly, under the same rules.
+          const blockers = finalizeBlockers(state);
+          if (blockers.length) throw new PublishError(400, `Cannot finalize the genesis for publishing: ${blockers.join("; ")}`);
+        }
         const genesis = state.finalizedGenesis?.genesis ?? buildGenesis(state.settings, state.pillars);
         const now = new Date().toISOString();
         if (!state.finalizedGenesis) {

@@ -19,6 +19,23 @@ export function publishSnapshotKey(settings: NetworkSettings): string {
   return JSON.stringify(settingsSnapshot(settings));
 }
 
+/**
+ * Identity of the settings that are baked into genesis.json. A finalized genesis is discarded when
+ * any of these change. Seeders, bootstrap peers and the pillar-count thresholds are deliberately
+ * excluded: they only reach config.json and the readiness checks, and seeders are routinely added
+ * after launch, when a re-finalize would be refused because the genesis time has passed.
+ */
+export function genesisSettingsKey(settings: NetworkSettings): string {
+  return JSON.stringify({
+    chainIdentifier: settings.chainIdentifier,
+    extraData: settings.extraData,
+    sporkAddress: settings.sporkAddress,
+    genesisTimestampSec: settings.genesisTimestampSec,
+    sporks: settings.sporks,
+    genesisFunds: settings.genesisFunds
+  });
+}
+
 /** The parts of a pillar record that feed genesis and node configs (telemetry excluded). */
 function pillarGenesisInputs(pillar: PillarRecord) {
   return {

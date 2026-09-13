@@ -256,6 +256,26 @@ export function buildNodeConfig(
   };
 }
 
+/**
+ * Reasons a finalize must be refused. Finalize locks genesis.json, so it needs enough pillars, a
+ * genesis time that has not passed, and the spork address the chain will honour. Returns [] when
+ * finalizing is allowed.
+ */
+export function finalizeBlockers(state: Pick<AppState, "settings" | "pillars">, nowSec = Math.floor(Date.now() / 1000)): string[] {
+  const blockers: string[] = [];
+  const pillarCount = state.pillars.length;
+  if (pillarCount < state.settings.minPillars) {
+    blockers.push(`at least ${state.settings.minPillars} pillars must be registered (${pillarCount} registered)`);
+  }
+  if (state.settings.genesisTimestampSec <= nowSec) {
+    blockers.push("the genesis start time is in the past; set a future time in Network and save");
+  }
+  if (!state.settings.sporkAddress) {
+    blockers.push("the spork address is missing");
+  }
+  return blockers;
+}
+
 export function readiness(state: AppState): ReadinessCheck[] {
   const pillarCount = state.pillars.length;
   return [
