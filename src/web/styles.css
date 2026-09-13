@@ -1424,3 +1424,173 @@ pre {
 .detailItem .ledger {
   display: inline;
 }
+
+.launchBar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: -28px -28px 0;
+  border-bottom: 1px solid var(--border);
+  background: #181b1a;
+  padding: 12px 24px;
+}
+
+.launchSelect {
+  min-width: 220px;
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stepperItem {
+  display: flex;
+  align-items: center;
+}
+
+.stepperButton {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.stepperLine {
+  display: block;
+  width: 26px;
+  height: 2px;
+  background: #2a302d;
+}
+
+.stepperLine.done {
+  background: rgba(0, 213, 87, 0.4);
+}
+
+.nextHint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.btn.small {
+  min-height: 30px;
+  padding: 4px 12px;
+  font-size: 0.85rem;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.sectionCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+}
+
+.sectionCard {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--panel);
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sectionCard:hover {
+  background: var(--panel-2);
+}
+
+.sectionCard strong {
+  font-size: 1.25rem;
+}
+
+.sectionCard small {
+  color: var(--muted);
+}
+
+.sectionCard.danger {
+  border-color: rgba(255, 84, 112, 0.45);
+}
+
+.sectionCard.warn {
+  border-color: rgba(247, 201, 72, 0.38);
+}
+
+.checklist {
+  display: grid;
+}
+
+.checklistRow {
+  display: grid;
+  grid-template-columns: auto minmax(180px, auto) minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid #272c2a;
+  color: var(--text);
+  background: transparent;
+  padding: 10px 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.checklistRow:last-child {
+  border-bottom: 0;
+}
+
+.checklistRow.pending strong {
+  color: var(--muted);
+}
+
+.readinessTiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.readinessTile {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 13px;
+}
+
+.readinessTile strong,
+.readinessTile small {
+  display: block;
+}
+
+.readinessDot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+.readinessDot.ok {
+  background: var(--green);
+}

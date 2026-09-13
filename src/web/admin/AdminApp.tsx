@@ -9,13 +9,17 @@ import type {
 } from "../../shared/types";
 import { api, type RefreshState } from "../shared/api";
 import { settingsKey } from "../shared/format";
+import { LaunchBar } from "./LaunchBar";
+import { LaunchOps } from "./LaunchOps";
 import { NetworkSection, type ProbeSeedInput } from "./NetworkSection";
 import { NodesSection, type CreateSeedNodeInput } from "./NodesSection";
+import { evaluatePlaybook } from "./playbooks";
 import { ReleaseSection } from "./ReleaseSection";
 import { defaultSection, type SectionId } from "./sections";
 import { Sidebar } from "./Sidebar";
 import { nodeHealth, telemetryNodes } from "./telemetry";
 import { useHashSection } from "./useHashSection";
+import { usePlaybook } from "./usePlaybook";
 import { UsersSection, type CreateUserInput } from "./UsersSection";
 
 export function AdminApp({
@@ -38,6 +42,11 @@ export function AdminApp({
   const settingsDirty = useMemo(() => settingsKey(settingsDraft) !== settingsKey(settingsBase), [settingsDraft, settingsBase]);
   const [adminError, setAdminError] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [playbook, setPlaybook] = usePlaybook();
+  const evaluation = useMemo(
+    () => evaluatePlaybook(playbook, { overview: session, draft: settingsDraft, settingsDirty }),
+    [playbook, session, settingsDraft, settingsDirty]
+  );
 
   useEffect(() => {
     const previousBase = settingsBaseRef.current;
@@ -178,11 +187,15 @@ export function AdminApp({
     <div className="appShell adminShell">
       <Sidebar user={session.user} section={section} onNavigate={setSection} badges={badges} onLogout={onLogout} />
       <main className="content adminContent">
+        <LaunchBar playbook={playbook} onPlaybookChange={setPlaybook} evaluation={evaluation} onNavigate={setSection} />
         {adminError ? <div className="alert">{adminError}</div> : null}
-        {section === "status" || section === "launch" ? (
+        {section === "status" ? (
           <section className="panel">
             <div className="emptyState">Coming in the next stage.</div>
           </section>
+        ) : null}
+        {section === "launch" ? (
+          <LaunchOps overview={session} nodes={nodes} settingsDirty={settingsDirty} evaluation={evaluation} onNavigate={setSection} />
         ) : null}
         {section === "users" ? (
           <UsersSection
