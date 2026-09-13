@@ -1,5 +1,5 @@
 import { KeyRound, Server, Trash2 } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { Fragment, FormEvent, useMemo, useState } from "react";
 import type { AdminOverview, PublicPillar, PublicSeedNode } from "../../shared/types";
 import type { RefreshState } from "../shared/api";
 import { copy, download } from "../shared/format";
@@ -146,6 +146,7 @@ export function NodesSection({
     [overview.users]
   );
   const [detailed, setDetailed] = useState(false);
+  const [openRows, setOpenRows] = useState<Set<string>>(new Set());
   const [seedNodeInput, setSeedNodeInput] = useState<CreateSeedNodeInput>({
     userId: "",
     nodeName: "",
@@ -155,6 +156,15 @@ export function NodesSection({
   const [seedNodeBusy, setSeedNodeBusy] = useState(false);
   const [seedNodeError, setSeedNodeError] = useState("");
   const [generatedSeedNode, setGeneratedSeedNode] = useState<PublicSeedNode | null>(null);
+
+  function toggleRow(id: string) {
+    setOpenRows((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   async function createManagedSeedNode(event: FormEvent) {
     event.preventDefault();
@@ -215,18 +225,39 @@ export function NodesSection({
               </thead>
               <tbody>
                 {overview.pillars.map((pillar) => (
-                  <tr key={pillar.id} title={`reward ${pillar.rewardAddress} · producer ${pillar.producerAddress}`}>
-                    <td>{pillar.pillarName}</td>
-                    <td>
-                      <AddressValue value={pillar.pillarAddress} />
-                    </td>
-                    <td className="mono">{new Date(pillar.createdAt).toLocaleString()}</td>
-                    <td>
-                      <Button variant="danger" icon={<Trash2 size={18} />} onClick={() => void onDeletePillar(pillar)}>
-                        Delete
-                      </Button>
-                    </td>
-                  </tr>
+                  <Fragment key={pillar.id}>
+                    <tr title={`reward ${pillar.rewardAddress} · producer ${pillar.producerAddress}`}>
+                      <td>{pillar.pillarName}</td>
+                      <td>
+                        <AddressValue value={pillar.pillarAddress} />
+                      </td>
+                      <td className="mono">{new Date(pillar.createdAt).toLocaleString()}</td>
+                      <td>
+                        <div className="toolbar compactToolbar">
+                          <Button variant="ghost" onClick={() => toggleRow(pillar.id)}>
+                            {openRows.has(pillar.id) ? "Hide" : "Details"}
+                          </Button>
+                          <Button variant="danger" icon={<Trash2 size={18} />} onClick={() => void onDeletePillar(pillar)}>
+                            Delete
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                    {openRows.has(pillar.id) ? (
+                      <tr className="detailRow">
+                        <td colSpan={4}>
+                          <span className="detailItem">
+                            <span className="ledger">Reward</span>
+                            <AddressValue value={pillar.rewardAddress} />
+                          </span>
+                          <span className="detailItem">
+                            <span className="ledger">Producer</span>
+                            <AddressValue value={pillar.producerAddress} />
+                          </span>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 ))}
                 {overview.pillars.length === 0 ? (
                   <tr>
@@ -258,23 +289,45 @@ export function NodesSection({
               </thead>
               <tbody>
                 {overview.seedNodes.map((seedNode) => (
-                  <tr
-                    key={seedNode.id}
-                    title={`operator ${userById.get(seedNode.userId)?.username ?? "unknown"} · ${seedNode.multiaddr}`}
-                  >
-                    <td>{seedNode.nodeName}</td>
-                    <td className="mono">
-                      {seedNode.publicIp}:{seedNode.p2pPort}
-                    </td>
-                    <td>
-                      <AddressValue value={seedNode.enode} />
-                    </td>
-                    <td>
-                      <Button variant="danger" icon={<Trash2 size={18} />} onClick={() => void onDeleteSeedNode(seedNode)}>
-                        Delete
-                      </Button>
-                    </td>
-                  </tr>
+                  <Fragment key={seedNode.id}>
+                    <tr title={`operator ${userById.get(seedNode.userId)?.username ?? "unknown"} · ${seedNode.multiaddr}`}>
+                      <td>{seedNode.nodeName}</td>
+                      <td className="mono">
+                        {seedNode.publicIp}:{seedNode.p2pPort}
+                      </td>
+                      <td>
+                        <AddressValue value={seedNode.enode} />
+                      </td>
+                      <td>
+                        <div className="toolbar compactToolbar">
+                          <Button variant="ghost" onClick={() => toggleRow(seedNode.id)}>
+                            {openRows.has(seedNode.id) ? "Hide" : "Details"}
+                          </Button>
+                          <Button variant="danger" icon={<Trash2 size={18} />} onClick={() => void onDeleteSeedNode(seedNode)}>
+                            Delete
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                    {openRows.has(seedNode.id) ? (
+                      <tr className="detailRow">
+                        <td colSpan={4}>
+                          <span className="detailItem">
+                            <span className="ledger">Operator</span>
+                            <span className="mono">{userById.get(seedNode.userId)?.username ?? "unknown"}</span>
+                          </span>
+                          <span className="detailItem">
+                            <span className="ledger">Public key</span>
+                            <AddressValue value={seedNode.publicKey} />
+                          </span>
+                          <span className="detailItem">
+                            <span className="ledger">Multiaddr</span>
+                            <AddressValue value={seedNode.multiaddr} />
+                          </span>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 ))}
                 {overview.seedNodes.length === 0 ? (
                   <tr>

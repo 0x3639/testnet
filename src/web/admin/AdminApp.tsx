@@ -118,7 +118,9 @@ export function AdminApp({
       method: "POST",
       body: JSON.stringify(input)
     });
-    await refresh();
+    // The node exists once the POST returns; a failed refresh must not discard its enode/multiaddr.
+    // The 30-second poll corrects the overview.
+    await refresh().catch(() => undefined);
     return result.seedNode;
   }
 
