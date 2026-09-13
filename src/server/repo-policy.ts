@@ -65,8 +65,21 @@ export function redactUrl(value: string): string {
  * allowed so a deployment can never be locked out by its own default settings.
  */
 export function loadRepoPolicy(env: NodeJS.ProcessEnv, configuredDefaults: string[]): RepoPolicy {
-  const allowedHosts = splitList(env.ALLOWED_REPO_HOSTS).map((host) => host.toLowerCase());
+  const explicitHosts = splitList(env.ALLOWED_REPO_HOSTS).map((host) => host.toLowerCase());
   const repoSetting = env.ALLOWED_REPOS?.trim();
+  const useDefaultRepos = !repoSetting;
+  // With both allowlists implicit, the configured defaults' hosts must be allowed too, or a default
+  // on another host would fail the host check before its repository entry is ever consulted.
+  const configuredDefaultHosts = useDefaultRepos
+    ? configuredDefaults.map((repo) => {
+        const normalized = normalizeRepoUrl(repo);
+        if (!normalized) throw new Error(`Configured default repository is not a valid URL: ${redactUrl(repo)}`);
+        return new URL(normalized).hostname.toLowerCase();
+      })
+    : [];
+  const allowedHosts = (explicitHosts.length ? explicitHosts : ["github.com", ...configuredDefaultHosts]).filter(
+    (host, index, all) => all.indexOf(host) === index
+  );
   const repoList = repoSetting === "*" ? undefined : splitList(repoSetting).length ? splitList(repoSetting) : [...DEFAULT_ALLOWED_REPOS, ...configuredDefaults];
   const allowedRepos = repoList
     ?.map((repo) => {
@@ -75,10 +88,7 @@ export function loadRepoPolicy(env: NodeJS.ProcessEnv, configuredDefaults: strin
       return normalized;
     })
     .filter((repo, index, all) => all.indexOf(repo) === index);
-  return {
-    allowedHosts: allowedHosts.length ? allowedHosts : ["github.com"],
-    allowedRepos
-  };
+  return { allowedHosts, allowedRepos };
 }
 
 export interface RepoCheck {

@@ -55,6 +55,19 @@ describe("repository policy", () => {
     assert.equal(withCustom.allowedRepos?.length, DEFAULT_ALLOWED_REPOS.length + 1);
   });
 
+  it("admits a configured default on another host when both allowlists are implicit", () => {
+    const implicit = loadRepoPolicy({}, ["https://git.example.org/zenon/go-zenon.git"]);
+    assert.deepEqual(implicit.allowedHosts, ["github.com", "git.example.org"]);
+    assert.equal(checkRepoUrl("https://git.example.org/zenon/go-zenon", implicit).ok, true);
+    assert.equal(checkRepoUrl("https://git.example.org/zenon/other", implicit).ok, false);
+    // An explicit host list is preserved as given, and explicit ALLOWED_REPOS drops the configured defaults.
+    const explicitHosts = loadRepoPolicy({ ALLOWED_REPO_HOSTS: "github.com" }, ["https://git.example.org/zenon/go-zenon.git"]);
+    assert.deepEqual(explicitHosts.allowedHosts, ["github.com"]);
+    const explicitRepos = loadRepoPolicy({ ALLOWED_REPOS: "https://github.com/someone/fork.git" }, ["https://git.example.org/zenon/go-zenon.git"]);
+    assert.deepEqual(explicitRepos.allowedHosts, ["github.com"]);
+    assert.equal(checkRepoUrl("https://git.example.org/zenon/go-zenon", explicitRepos).ok, false);
+  });
+
   it("allows any repository on an allowed host when ALLOWED_REPOS=*", () => {
     const open = loadRepoPolicy({ ALLOWED_REPOS: "*", ALLOWED_REPO_HOSTS: "github.com, example.org" }, defaults);
     assert.equal(checkRepoUrl("https://github.com/someone/fork.git", open).ok, true);
