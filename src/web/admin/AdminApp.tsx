@@ -17,6 +17,7 @@ import { evaluatePlaybook } from "./playbooks";
 import { ReleaseSection } from "./ReleaseSection";
 import { defaultSection, type SectionId } from "./sections";
 import { Sidebar } from "./Sidebar";
+import { StatusView } from "./StatusView";
 import { nodeHealth, telemetryNodes } from "./telemetry";
 import { useHashSection } from "./useHashSection";
 import { usePlaybook } from "./usePlaybook";
@@ -36,6 +37,14 @@ export function AdminApp({
   const fallback = defaultSection(Boolean(session.published));
   const [section, setSection] = useHashSection(fallback);
   const nodes = useMemo(() => telemetryNodes(session), [session.pillars, session.seedNodes]);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(Date.now());
+  useEffect(() => setLastUpdatedAt(Date.now()), [session]);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (section !== "status") return;
+    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [section]);
   const [settingsDraft, setSettingsDraft] = useState(session.settings);
   const [settingsBase, setSettingsBase] = useState(session.settings);
   const settingsBaseRef = useRef(session.settings);
@@ -190,9 +199,14 @@ export function AdminApp({
         <LaunchBar playbook={playbook} onPlaybookChange={setPlaybook} evaluation={evaluation} onNavigate={setSection} />
         {adminError ? <div className="alert">{adminError}</div> : null}
         {section === "status" ? (
-          <section className="panel">
-            <div className="emptyState">Coming in the next stage.</div>
-          </section>
+          <StatusView
+            overview={session}
+            nodes={nodes}
+            refresh={refresh}
+            refreshState={refreshState}
+            lastUpdatedAt={lastUpdatedAt}
+            onNavigate={setSection}
+          />
         ) : null}
         {section === "launch" ? (
           <LaunchOps overview={session} nodes={nodes} settingsDirty={settingsDirty} evaluation={evaluation} onNavigate={setSection} />

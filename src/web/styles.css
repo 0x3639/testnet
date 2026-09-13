@@ -1594,3 +1594,80 @@ pre {
 .readinessDot.ok {
   background: var(--green);
 }
+
+.statusTiles {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.sectionHeader h1 .liveDot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 10px;
+  vertical-align: middle;
+  box-shadow: 0 0 0 4px rgba(0, 213, 87, 0.15);
+}
+
+.attentionList,
+.healthList,
+.artifactRows {
+  display: grid;
+}
+
+.attentionRow,
+.healthRow,
+.artifactRow {
+  display: grid;
+  gap: 12px;
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid #272c2a;
+  color: var(--text);
+  background: transparent;
+  padding: 10px 0;
+  text-align: left;
+}
+
+.attentionRow:last-child,
+.healthRow:last-child,
+.artifactRow:last-child {
+  border-bottom: 0;
+}
+
+.attentionRow {
+  grid-template-columns: minmax(110px, auto) minmax(0, 1fr) auto;
+  cursor: pointer;
+}
+
+.healthRow {
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+}
+
+.statusColumns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px;
+}
+
+.kvRows {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 14px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.artifactRow {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  cursor: pointer;
+}
+
+.artifactName {
+  color: var(--green);
+}
+
+.artifactUrl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
