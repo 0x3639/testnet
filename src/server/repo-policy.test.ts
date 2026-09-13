@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
-import { checkCommit, checkGitRef, checkRepoUrl, loadRepoPolicy, normalizeRepoUrl, redactUrl, releasePolicyErrors } from "./repo-policy.js";
+import { checkCommit, checkGitRef, checkRepoUrl, DEFAULT_ALLOWED_REPOS, loadRepoPolicy, normalizeRepoUrl, redactUrl, releasePolicyErrors } from "./repo-policy.js";
 
 const defaults = ["https://github.com/zenon-network/go-zenon.git", "https://github.com/hypercore-one/deployment.git"];
 const policy = loadRepoPolicy({}, defaults);
@@ -37,6 +37,22 @@ describe("repository policy", () => {
       "ssh://git@github.com/zenon-network/go-zenon.git"
     ];
     for (const url of rejected) assert.equal(checkRepoUrl(url, policy).ok, false, url);
+  });
+
+  it("preapproves the go-zenon forks and the deployment repo by default, plus configured defaults", () => {
+    assert.deepEqual(DEFAULT_ALLOWED_REPOS, [
+      "https://github.com/zenon-network/go-zenon.git",
+      "https://github.com/digitalSloth/go-zenon.git",
+      "https://github.com/0x3639/go-zenon.git",
+      "https://github.com/hypercore-one/deployment.git"
+    ]);
+    for (const url of DEFAULT_ALLOWED_REPOS) assert.equal(checkRepoUrl(url, policy).ok, true, url);
+    assert.equal(checkRepoUrl("https://github.com/someone-else/go-zenon.git", policy).ok, false);
+    // A custom configured default (GO_ZENON_REPO / DEPLOYMENT_REPO) is always allowed too.
+    const withCustom = loadRepoPolicy({}, ["https://github.com/example/go-zenon.git"]);
+    assert.equal(checkRepoUrl("https://github.com/example/go-zenon", withCustom).ok, true);
+    assert.equal(checkRepoUrl("https://github.com/digitalSloth/go-zenon", withCustom).ok, true);
+    assert.equal(withCustom.allowedRepos?.length, DEFAULT_ALLOWED_REPOS.length + 1);
   });
 
   it("allows any repository on an allowed host when ALLOWED_REPOS=*", () => {

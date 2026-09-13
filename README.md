@@ -4,6 +4,28 @@ Web tooling for coordinating a Zenon Network of Momentum testnet. The app lets a
 
 The backend is Node/Express. The frontend is React/Vite and follows the dark, compact NoM-style interface used by `digitalSloth/nom-ui`. Wallet and address generation uses `digitalSloth/znn-typescript-sdk`.
 
+## Quick Start
+
+Pick one of the two hosting paths. Both end with an admin login at your URL; the linked sections have the details.
+
+**Coolify (hosted, TLS handled for you)**
+
+1. Generate a secret once and keep it: `openssl rand -hex 32`.
+2. In Coolify, add a **Docker Compose** resource from this Git repository (`https://github.com/0x3639/testnet.git`, branch `main`, compose file `docker-compose.coolify.yml`). See [Create The Resource](#create-the-resource).
+3. Point a DNS `A` record at the Coolify server, then set the `app` service's domain to `https://<your-host>:8787` (the `:8787` is required). See [Set Up The Domain](#set-up-the-domain).
+4. Set `APP_SECRET` to the secret from step 1 in the resource's environment variables; the other variables have working defaults. See [Environment Variables](#environment-variables).
+5. Deploy, then open the `app` container's terminal and create the admin login with `setpriv --reuid=node --regid=node --init-groups node dist/server/server/cli.js create-admin --username admin`. See [Create The First Admin](#create-the-first-admin).
+6. Sign in at `https://<your-host>` and follow the Launch Ops checklist.
+
+**Docker on your own machine (plain HTTP, localhost only)**
+
+1. `git clone https://github.com/0x3639/testnet.git && cd testnet`
+2. `APP_SECRET="$(openssl rand -hex 32)" docker compose up -d --build` (save that secret; you need the same value on every restart).
+3. `docker compose exec --user node app node dist/server/server/cli.js create-admin --username admin`
+4. Open `http://localhost:8080` and sign in. See [Standalone Docker](#standalone-docker) for exposing it beyond localhost.
+
+Both paths preapprove the same release repositories (`zenon-network/go-zenon`, `digitalSloth/go-zenon`, `0x3639/go-zenon`, and `hypercore-one/deployment`); see [Release Repository Policy](#release-repository-policy) to change that.
+
 ## Features
 
 - Admin and operator logins backed by local persistent state.
@@ -86,7 +108,7 @@ npm run account -- create-user --username pillar-a --password "change-me"
 | `TRUST_PROXY` | `loopback` | Express `trust proxy` setting. Controls which peers may set `X-Forwarded-*` (and therefore the client address used by login rate limiting). Both compose files set `uniquelocal` because the reverse proxy (the bundled Caddy, or Coolify's proxy) reaches the app over a private Docker network; any peer in the trusted range can forge forwarded addresses, so keep it as narrow as your topology allows. |
 | `COOKIE_SECURE` | `false` | Set to `true` when served over HTTPS so the session cookie is only sent over TLS. |
 | `ALLOWED_REPO_HOSTS` | `github.com` | Comma-separated hosts that release repositories may live on. |
-| `ALLOWED_REPOS` | the default go-zenon and deployment repositories | Comma-separated repository URLs an admin may publish (host compared case-insensitively, path exactly). Add forks here to allow them; set to `*` to allow any repository on an allowed host. |
+| `ALLOWED_REPOS` | `zenon-network/go-zenon`, `digitalSloth/go-zenon`, `0x3639/go-zenon`, `hypercore-one/deployment` (plus `GO_ZENON_REPO` / `DEPLOYMENT_REPO` if set) | Comma-separated repository URLs an admin may publish (host compared case-insensitively, path exactly). Setting it replaces the default list; set to `*` to allow any repository on an allowed host. |
 | `GO_ZENON_COMMIT`, `DEPLOYMENT_COMMIT` | none | Default commit pins for fresh installs (full 40-character hashes). |
 
 The container runs the server as the unprivileged `node` user. The entrypoint starts as root only long enough to fix ownership of the data volume, so volumes created by earlier root-only images keep working without manual changes.
@@ -95,7 +117,7 @@ Login is rate limited: 10 attempts per account from one address, or 50 attempts 
 
 ## Release Repository Policy
 
-Operator nodes clone and run the published repositories as root, so the server only accepts release settings that pass the repository policy: `https://` URLs without embedded credentials, on a host in `ALLOWED_REPO_HOSTS`, and (unless `ALLOWED_REPOS=*`) exactly one of the URLs in `ALLOWED_REPOS`. Refs must satisfy the same rules as `git check-ref-format --branch`. The policy is enforced when settings are saved and again when a release is published; a previously published release that violates it is withheld from nodes. The admin settings form shows the active policy.
+Operator nodes clone and run the published repositories as root, so the server only accepts release settings that pass the repository policy: `https://` URLs without embedded credentials, on a host in `ALLOWED_REPO_HOSTS`, and (unless `ALLOWED_REPOS=*`) exactly one of the allowed repositories. By default these are the go-zenon sources `zenon-network/go-zenon`, `digitalSloth/go-zenon`, and `0x3639/go-zenon`, plus `hypercore-one/deployment`, whose `zenon.sh` installer the node bootstrap runs; whatever `GO_ZENON_REPO` and `DEPLOYMENT_REPO` are set to is always allowed as well. Setting `ALLOWED_REPOS` replaces that list. Refs must satisfy the same rules as `git check-ref-format --branch`. The policy is enforced when settings are saved and again when a release is published; a previously published release that violates it is withheld from nodes. The admin settings form shows the active policy.
 
 Every published release is immutable. Commit pins are full 40-character hashes; a pin left empty in the settings is resolved to the ref's current commit at publish time (by reading the repository's advertised refs over HTTPS), so the published plan always carries both pins and publishing fails if a ref cannot be resolved. Nodes then verify them:
 

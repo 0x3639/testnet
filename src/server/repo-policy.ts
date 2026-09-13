@@ -4,10 +4,18 @@
  * rather than left to the admin session alone.
  *
  *   ALLOWED_REPO_HOSTS  comma-separated hostnames (default: github.com)
- *   ALLOWED_REPOS       comma-separated repository URLs (default: the configured default go-zenon
- *                       and deployment repositories); "*" disables the repository list and leaves
- *                       only the host check
+ *   ALLOWED_REPOS       comma-separated repository URLs (default: DEFAULT_ALLOWED_REPOS plus the
+ *                       configured default go-zenon and deployment repositories); "*" disables the
+ *                       repository list and leaves only the host check
  */
+
+/** Repositories an admin may publish when ALLOWED_REPOS is not set. */
+export const DEFAULT_ALLOWED_REPOS = [
+  "https://github.com/zenon-network/go-zenon.git",
+  "https://github.com/digitalSloth/go-zenon.git",
+  "https://github.com/0x3639/go-zenon.git",
+  "https://github.com/hypercore-one/deployment.git"
+] as const;
 export interface RepoPolicy {
   allowedHosts: string[];
   /** Normalized repository URLs, or undefined when any repository on an allowed host is accepted. */
@@ -52,15 +60,21 @@ export function redactUrl(value: string): string {
   }
 }
 
-export function loadRepoPolicy(env: NodeJS.ProcessEnv, defaultRepos: string[]): RepoPolicy {
+/**
+ * `configuredDefaults` are the GO_ZENON_REPO / DEPLOYMENT_REPO defaults in force; they are always
+ * allowed so a deployment can never be locked out by its own default settings.
+ */
+export function loadRepoPolicy(env: NodeJS.ProcessEnv, configuredDefaults: string[]): RepoPolicy {
   const allowedHosts = splitList(env.ALLOWED_REPO_HOSTS).map((host) => host.toLowerCase());
   const repoSetting = env.ALLOWED_REPOS?.trim();
-  const repoList = repoSetting === "*" ? undefined : splitList(repoSetting).length ? splitList(repoSetting) : defaultRepos;
-  const allowedRepos = repoList?.map((repo) => {
-    const normalized = normalizeRepoUrl(repo);
-    if (!normalized) throw new Error(`ALLOWED_REPOS contains an invalid URL: ${redactUrl(repo)}`);
-    return normalized;
-  });
+  const repoList = repoSetting === "*" ? undefined : splitList(repoSetting).length ? splitList(repoSetting) : [...DEFAULT_ALLOWED_REPOS, ...configuredDefaults];
+  const allowedRepos = repoList
+    ?.map((repo) => {
+      const normalized = normalizeRepoUrl(repo);
+      if (!normalized) throw new Error(`ALLOWED_REPOS contains an invalid URL: ${redactUrl(repo)}`);
+      return normalized;
+    })
+    .filter((repo, index, all) => all.indexOf(repo) === index);
   return {
     allowedHosts: allowedHosts.length ? allowedHosts : ["github.com"],
     allowedRepos
