@@ -30,6 +30,8 @@ The safe initial policy is deliberate:
   without an operator decision.
 - No scan interval is set, so the first runs are explicitly controlled and
   their provider usage can be observed.
+- The profile scans one file at a time for the initial baseline to keep
+  provider usage bounded. Increase concurrency only after reviewing that run.
 
 The command prints the assigned repository ID. Start the baseline scan with:
 
