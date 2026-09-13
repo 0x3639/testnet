@@ -18,7 +18,8 @@ export function Button({
   variant = "primary",
   type = "button",
   onClick,
-  disabled
+  disabled,
+  "aria-pressed": ariaPressed
 }: {
   children: React.ReactNode;
   icon?: React.ReactNode;
@@ -26,9 +27,10 @@ export function Button({
   type?: "button" | "submit";
   onClick?: () => void;
   disabled?: boolean;
+  "aria-pressed"?: boolean;
 }) {
   return (
-    <button className={`btn ${variant}`} type={type} onClick={onClick} disabled={disabled}>
+    <button className={`btn ${variant}`} type={type} onClick={onClick} disabled={disabled} aria-pressed={ariaPressed}>
       {icon}
       <span>{children}</span>
     </button>

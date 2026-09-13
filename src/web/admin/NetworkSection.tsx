@@ -330,7 +330,7 @@ export function NetworkSection({
           {error ? <div className="alert">{error}</div> : null}
         </form>
 
-        <div className="nodePanels">
+        <div className="networkEditors">
           <GenesisSporkEditor draft={draft} setDraft={setDraft} onSave={onSave} />
           <GenesisFundingEditor draft={draft} setDraft={setDraft} onSave={onSave} />
         </div>

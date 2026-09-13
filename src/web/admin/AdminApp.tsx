@@ -158,8 +158,13 @@ export function AdminApp({
       setAdminError("Save Settings before finalizing the genesis.");
       return;
     }
-    await api("/api/admin/finalize", { method: "POST" });
-    await refresh();
+    setAdminError("");
+    try {
+      await api("/api/admin/finalize", { method: "POST" });
+      await refresh();
+    } catch (err) {
+      setAdminError((err as Error).message);
+    }
   }
 
   async function publish() {

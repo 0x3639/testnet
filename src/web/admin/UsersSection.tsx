@@ -121,7 +121,7 @@ export function UsersSection({
         title="Users"
         description="One login per pillar or seed node operator. They sign in to register their node and download their package."
       />
-      <section className="panel wide">
+      <section className="panel">
         <div className="panelHeader">
           <div>
             <span className="ledger">Access</span>

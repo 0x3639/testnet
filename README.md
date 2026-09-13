@@ -119,7 +119,7 @@ DEPLOYMENT_REPO=https://github.com/hypercore-one/deployment.git
 DEPLOYMENT_REF=main
 ```
 
-After the app is running, admins can edit the go-zenon repo/ref, deployment repo/ref, the optional commit pins, one-shot data wipe flag, and optional release apply time from the Settings panel. Saving these values only updates the draft settings. They do not reach `/node-plan.json` or authenticated bootstrap manifests until an admin clicks **Publish Release**, which resolves any empty commit pin to the ref's current commit so the published release is immutable. Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`.
+After the app is running, admins can edit the go-zenon repo/ref, deployment repo/ref, the optional commit pins, one-shot data wipe flag, and optional release apply time from the Network section. Saving these values only updates the draft settings. They do not reach `/node-plan.json` or authenticated bootstrap manifests until an admin clicks **Publish Release**, which resolves any empty commit pin to the ref's current commit so the published release is immutable. Set `GO_ZENON_REF` to a branch or tag that the deployment script can clone with `git clone -b`.
 
 ## Standalone Docker
 
@@ -239,18 +239,20 @@ To move an existing testnet builder to Coolify without losing registrations:
 
 ## Admin Workflow
 
+The admin console has six sections: Status, Launch Ops, Users, Nodes, Network, and Release. The launch bar's playbook (Launch, Relaunch, or Change release) tracks which step comes next.
+
 1. Sign in as an admin.
-2. Create one operator login per expected pillar and managed seed node.
+2. In **Users**, create one operator login per expected pillar and managed seed node.
 3. Send each operator the copied login URL, username, and password.
 4. Ask pillar operators to sign in and choose a pillar name.
-5. Set the go-zenon and deployment repo/ref release target in Settings.
-6. Set **Genesis Start (UTC)** to the intended chain start time. For a coordinated restart, set it comfortably in the future.
-7. Optionally set **Apply Release At (UTC)** so nodes wait before stopping, wiping, downloading artifacts, and restarting.
-8. For managed seed nodes, create an operator login, then use **Seed Nodes** to select that login, enter node name, public IP, and p2p port. The app generates the network private key, public key, enode, and libp2p multiaddr immediately.
-9. Add or probe any external seed nodes, and confirm managed seed nodes are present in `Net.Seeders` and `Net.BootstrapPeers`.
-10. Review the generated `genesis.json` and `config.json`.
-11. Finalize the genesis when registrations are complete.
-12. Click **Publish Release** when the current genesis, config, seeders, bootstrap peers, and release target should become active for operators.
+5. In **Network**, set the go-zenon and deployment repo/ref release target.
+6. In **Network**, set **Genesis Start (UTC)** to the intended chain start time. For a coordinated restart, set it comfortably in the future.
+7. In **Network**, optionally set **Apply Release At (UTC)** so nodes wait before stopping, wiping, downloading artifacts, and restarting.
+8. In **Nodes**, for managed seed nodes, create an operator login, then use **Seed Nodes** to select that login, enter node name, public IP, and p2p port. The app generates the network private key, public key, enode, and libp2p multiaddr immediately.
+9. In **Network**, add or probe any external seed nodes, and confirm managed seed nodes are present in `Net.Seeders` and `Net.BootstrapPeers`.
+10. In **Release**, review the generated `genesis.json` and `config.json`.
+11. In **Release**, finalize the genesis when registrations are complete.
+12. In **Release**, click **Publish Release** when the current genesis, config, seeders, bootstrap peers, and release target should become active for operators.
 
 Admins can also reset user passwords, delete users, delete pillar registrations, delete managed seed nodes, and download the spork wallet package.
 

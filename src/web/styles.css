@@ -235,22 +235,10 @@ textarea {
   overflow: auto;
 }
 
-.pageGrid,
-.adminLayout {
+.pageGrid {
   display: grid;
   gap: 18px;
-}
-
-.pageGrid {
   grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.7fr);
-}
-
-.adminLayout {
-  grid-template-columns: minmax(320px, 0.8fr) minmax(0, 1.2fr);
-}
-
-.wide {
-  grid-column: 1 / -1;
 }
 
 .sectionTitle {
@@ -377,33 +365,6 @@ textarea {
   font-size: 0.86rem;
 }
 
-.statusGrid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
-  grid-column: 1 / -1;
-}
-
-.statusItem {
-  display: flex;
-  gap: 10px;
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel);
-  padding: 13px;
-}
-
-.statusItem strong,
-.statusItem span {
-  display: block;
-}
-
-.statusItem span {
-  color: var(--muted);
-  font-size: 0.86rem;
-}
-
 .mutedText {
   color: var(--muted);
 }
@@ -469,6 +430,7 @@ textarea {
   grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) minmax(160px, 1fr) 112px auto;
   gap: 12px;
   align-items: end;
+  margin-top: 14px;
   margin-bottom: 14px;
 }
 
@@ -565,10 +527,6 @@ th {
   color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.settingsForm {
-  align-self: start;
 }
 
 .seedProbe {
@@ -713,10 +671,6 @@ th {
 .resultStack {
   display: grid;
   gap: 8px;
-}
-
-.jsonPanel {
-  min-width: 0;
 }
 
 .publishedBlock {
@@ -1161,8 +1115,6 @@ pre {
   }
 
   .pageGrid,
-  .adminLayout,
-  .statusGrid,
   .userCreateGrid,
   .seedCreateGrid {
     grid-template-columns: 1fr;
@@ -1233,6 +1185,12 @@ pre {
 .nodePanels {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 18px;
+}
+
+.networkEditors {
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 18px;
 }
 
@@ -1311,6 +1269,12 @@ pre {
   background: var(--green);
 }
 
+.stepCircle.pending {
+  border-color: #313735;
+  color: #6f7772;
+  background: #181b1a;
+}
+
 .wipeBanner {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1325,7 +1289,7 @@ pre {
 }
 
 .adminShell {
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 220px minmax(0, 1fr);
 }
 
 .adminSidebar {
@@ -1391,6 +1355,9 @@ pre {
   display: grid;
   align-content: start;
   gap: 18px;
+  min-width: 0;
+  padding-top: 0;
+  overflow: visible;
 }
 
 @media (max-width: 760px) {
@@ -1433,13 +1400,14 @@ pre {
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
-  margin: -28px -28px 0;
+  margin: 0 -28px 0;
   border-bottom: 1px solid var(--border);
   background: #181b1a;
   padding: 12px 24px;
 }
 
 .launchSelect {
+  width: auto;
   min-width: 220px;
 }
 
@@ -1486,15 +1454,6 @@ pre {
   min-height: 30px;
   padding: 4px 12px;
   font-size: 0.85rem;
-}
-
-.visuallyHidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
 }
 
 .sectionCards {

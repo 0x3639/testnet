@@ -5,6 +5,7 @@ import type { RefreshState } from "../shared/api";
 import { copy, download } from "../shared/format";
 import { AddressValue, Button, RefreshButton } from "../shared/ui";
 import { SectionHeader } from "./SectionHeader";
+import { healthCounts } from "./statusAggregates";
 import { Tooltip } from "./Tooltip";
 import { TIPS } from "./tooltips";
 import {
@@ -38,14 +39,14 @@ function NodeStatusPanel({
   onToggleDetailed: () => void;
 }) {
   return (
-    <section className="panel wide">
+    <section className="panel">
       <div className="panelHeader">
         <div>
           <span className="ledger">Telemetry</span>
           <h2>Node Status<Tooltip text={TIPS["nodes.health"]} /></h2>
         </div>
         <div className="toolbar compactToolbar">
-          <Button variant="ghost" onClick={onToggleDetailed}>
+          <Button variant="ghost" onClick={onToggleDetailed} aria-pressed={detailed}>
             {detailed ? "Compact" : "Detailed"}
           </Button>
           <RefreshButton refresh={refresh} state={refreshState} />
@@ -158,6 +159,7 @@ export function NodesSection({
   const [seedNodeBusy, setSeedNodeBusy] = useState(false);
   const [seedNodeError, setSeedNodeError] = useState("");
   const [generatedSeedNode, setGeneratedSeedNode] = useState<PublicSeedNode | null>(null);
+  const counts = healthCounts(nodes);
 
   function toggleRow(id: string) {
     setOpenRows((current) => {
@@ -194,6 +196,11 @@ export function NodesSection({
       <SectionHeader
         title="Nodes"
         description="Pillars register themselves; seed nodes are generated here. Health reports arrive once nodes run the bootstrap."
+        aside={counts.map((c) => (
+          <span key={c.label} className={`statusPill ${c.tone}`}>
+            {c.count} {c.label}
+          </span>
+        ))}
       />
       <NodeStatusPanel
         nodes={nodes}

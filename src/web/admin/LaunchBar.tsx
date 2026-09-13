@@ -1,6 +1,6 @@
 import { Check } from "lucide-react";
 import { PLAYBOOK_IDS, PLAYBOOKS, type PlaybookEvaluation, type PlaybookId } from "./playbooks";
-import { SECTION_LABELS, type SectionId } from "./sections";
+import type { SectionId } from "./sections";
 
 export function StepCircle({ state, index }: { state: "done" | "current" | "pending"; index: number }) {
   return <span className={`stepCircle ${state}`}>{state === "done" ? <Check size={14} /> : index + 1}</span>;
@@ -39,7 +39,6 @@ export function LaunchBar({ playbook, onPlaybookChange, evaluation, onNavigate }
         ) : (
           <span className="mono mutedText">All steps complete</span>
         )}
-        <span className="visuallyHidden">{SECTION_LABELS[current?.section ?? "status"]}</span>
       </div>
     </div>
   );
