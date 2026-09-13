@@ -46,14 +46,24 @@ export function NetworkSection({
   const [seedResult, setSeedResult] = useState<SeedNodeProbeResult | null>(null);
   const [probing, setProbing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savePending, setSavePending] = useState(false);
   const [error, setError] = useState("");
+
+  const guardedSave = async (settings: PublicNetworkSettings) => {
+    setSavePending(true);
+    try {
+      await onSave(settings);
+    } finally {
+      setSavePending(false);
+    }
+  };
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
     setError("");
     try {
-      await onSave({
+      await guardedSave({
         ...draft,
         seeders: draft.seeders.filter(Boolean),
         bootstrapPeers: draft.bootstrapPeers.filter(Boolean),
@@ -76,7 +86,11 @@ export function NetworkSection({
         rpcPort: seedRpcPort,
         p2pPort: seedP2pPort
       });
-      setDraft(result.settings);
+      setDraft((current) => ({
+        ...current,
+        seeders: [...new Set([...current.seeders.filter(Boolean), result.seed.enode])],
+        bootstrapPeers: [...new Set([...current.bootstrapPeers.filter(Boolean), result.seed.multiaddr])]
+      }));
       setSeedResult(result.seed);
     } catch (err) {
       setError((err as Error).message);
@@ -331,14 +345,14 @@ export function NetworkSection({
         </form>
 
         <div className="networkEditors">
-          <GenesisSporkEditor draft={draft} setDraft={setDraft} onSave={onSave} />
-          <GenesisFundingEditor draft={draft} setDraft={setDraft} onSave={onSave} />
+          <GenesisSporkEditor draft={draft} setDraft={setDraft} onSave={guardedSave} saving={savePending} />
+          <GenesisFundingEditor draft={draft} setDraft={setDraft} onSave={guardedSave} saving={savePending} />
         </div>
 
         {settingsDirty ? (
           <div className="stickySaveBar">
             <span>Unsaved draft — Finalize and Publish are locked until you save.</span>
-            <button type="submit" form="networkSettingsForm" className="btn primary" disabled={saving}>
+            <button type="submit" form="networkSettingsForm" className="btn primary" disabled={saving || savePending}>
               <Save size={18} />
               <span>{saving ? "Saving" : "Save Settings"}</span>
             </button>
@@ -352,13 +366,15 @@ export function NetworkSection({
 function GenesisSporkEditor({
   draft,
   setDraft,
-  onSave
+  onSave,
+  saving
 }: {
   draft: PublicNetworkSettings;
   setDraft: React.Dispatch<React.SetStateAction<PublicNetworkSettings>>;
   onSave: (settings: PublicNetworkSettings) => Promise<void>;
+  saving: boolean;
 }) {
-  const [saving, setSaving] = useState(false);
+  const [localSaving, setLocalSaving] = useState(false);
   const [error, setError] = useState("");
 
   function updateSpork(index: number, updates: Partial<SporkRecord>) {
@@ -393,7 +409,7 @@ function GenesisSporkEditor({
 
   async function saveSporks(event: FormEvent) {
     event.preventDefault();
-    setSaving(true);
+    setLocalSaving(true);
     setError("");
     try {
       await onSave({
@@ -404,7 +420,7 @@ function GenesisSporkEditor({
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setSaving(false);
+      setLocalSaving(false);
     }
   }
 
@@ -419,8 +435,8 @@ function GenesisSporkEditor({
           <Button variant="secondary" icon={<Plus size={18} />} onClick={addSpork}>
             Add
           </Button>
-          <Button type="submit" icon={<Save size={18} />} disabled={saving}>
-            {saving ? "Saving" : "Save Sporks"}
+          <Button type="submit" icon={<Save size={18} />} disabled={saving || localSaving}>
+            {localSaving ? "Saving" : "Save Sporks"}
           </Button>
         </div>
       </div>
@@ -479,13 +495,15 @@ function GenesisSporkEditor({
 function GenesisFundingEditor({
   draft,
   setDraft,
-  onSave
+  onSave,
+  saving
 }: {
   draft: PublicNetworkSettings;
   setDraft: React.Dispatch<React.SetStateAction<PublicNetworkSettings>>;
   onSave: (settings: PublicNetworkSettings) => Promise<void>;
+  saving: boolean;
 }) {
-  const [saving, setSaving] = useState(false);
+  const [localSaving, setLocalSaving] = useState(false);
   const [error, setError] = useState("");
 
   function updateFund(index: number, updates: Partial<GenesisFundRecord>) {
@@ -519,7 +537,7 @@ function GenesisFundingEditor({
 
   async function saveFunds(event: FormEvent) {
     event.preventDefault();
-    setSaving(true);
+    setLocalSaving(true);
     setError("");
     try {
       await onSave({
@@ -530,7 +548,7 @@ function GenesisFundingEditor({
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setSaving(false);
+      setLocalSaving(false);
     }
   }
 
@@ -545,8 +563,8 @@ function GenesisFundingEditor({
           <Button variant="secondary" icon={<Plus size={18} />} onClick={addFund}>
             Add
           </Button>
-          <Button type="submit" icon={<Save size={18} />} disabled={saving}>
-            {saving ? "Saving" : "Save Funding"}
+          <Button type="submit" icon={<Save size={18} />} disabled={saving || localSaving}>
+            {localSaving ? "Saving" : "Save Funding"}
           </Button>
         </div>
       </div>

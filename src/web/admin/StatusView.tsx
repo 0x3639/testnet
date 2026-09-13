@@ -35,7 +35,7 @@ export function StatusView({ overview, nodes, refresh, refreshState, lastUpdated
   return (
     <>
       <SectionHeader
-        kicker={`Testnet-${overview.settings.chainIdentifier} · ${published ? "running" : "not launched"}`}
+        kicker={`Testnet-${overview.settings.chainIdentifier} · ${published ? "release published" : "no release published"}`}
         title={<><span className={`liveDot${published ? " on" : ""}`} /> Network Status</>}
         aside={<><span className="mono mutedText">Auto-refreshes every 30s · last update {secondsAgo}s ago</span><RefreshButton refresh={refresh} state={refreshState} /></>}
       />
@@ -70,7 +70,7 @@ export function StatusView({ overview, nodes, refresh, refreshState, lastUpdated
             ))}
           </div>
         ) : (
-          <div className="mono mutedText">All nodes online</div>
+          <div className="mono mutedText">{nodes.length === 0 ? "No nodes registered yet" : "All nodes online"}</div>
         )}
       </section>
       <div className="statusColumns">

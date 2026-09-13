@@ -1126,10 +1126,6 @@ pre {
     padding: 18px;
   }
 
-  .launchBar {
-    margin: 0 -18px;
-  }
-
   .sidebar {
     flex-wrap: wrap;
   }
@@ -1404,6 +1400,12 @@ pre {
   border-bottom: 1px solid var(--border);
   background: #181b1a;
   padding: 12px 24px;
+}
+
+@media (max-width: 640px) {
+  .launchBar {
+    margin: 0 -18px;
+  }
 }
 
 .launchSelect {

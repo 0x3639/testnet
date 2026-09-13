@@ -57,7 +57,6 @@ export function UsersSection({
     setBusy("create");
     setError("");
     setSuccess("");
-    onCredentialChange(null);
     try {
       const createdUsername = username;
       const createdPassword = password;
@@ -107,7 +106,6 @@ export function UsersSection({
     setBusy(`delete:${user.id}`);
     setError("");
     setSuccess("");
-    onCredentialChange(null);
     try {
       await onDeleteUser(user);
       setSuccess(`Deleted ${user.username}`);
@@ -139,7 +137,7 @@ export function UsersSection({
           <label>
             <span>Password</span>
             <div className="passwordEntry">
-              <input value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" />
+              <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" />
               <Button variant="secondary" icon={<KeyRound size={18} />} onClick={fillGeneratedPassword}>
                 Generate
               </Button>
@@ -216,6 +214,7 @@ export function UsersSection({
                     {resetOpenFor === user.id ? (
                       <form className="resetPasswordForm" onSubmit={(event) => resetPassword(event, user)}>
                         <input
+                          type="password"
                           value={resetPasswords[user.id] ?? ""}
                           onChange={(event) => setResetPasswords((current) => ({ ...current, [user.id]: event.target.value }))}
                           autoComplete="new-password"

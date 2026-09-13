@@ -11,10 +11,10 @@ function node(name: string, nodeType: "pillar" | "seed", latest?: Partial<NonNul
 }
 
 const fleet: TelemetryNode[] = [
-  node("alpha", "pillar", { sync: { state: 2, currentHeight: 184220, targetHeight: 184220 }, network: { peerCount: 9 } }),
-  node("beta", "pillar", { sync: { state: 2, currentHeight: 184220, targetHeight: 184220 }, network: { peerCount: 8 } }),
+  node("alpha", "pillar", { sync: { state: 2, currentHeight: 184220, targetHeight: 184220 }, network: { peerCount: 9 }, node: { serviceActive: true } }),
+  node("beta", "pillar", { sync: { state: 2, currentHeight: 184220, targetHeight: 184220 }, network: { peerCount: 8 }, node: { serviceActive: true } }),
   node("gamma", "pillar", { sync: { state: 1, currentHeight: 163904, targetHeight: 184220 }, network: { peerCount: 7 } }),
-  node("seed-frankfurt", "seed", { sync: { state: 2, currentHeight: 184220, targetHeight: 184220 }, network: { peerCount: 11 } }),
+  node("seed-frankfurt", "seed", { sync: { state: 2, currentHeight: 184220, targetHeight: 184220 }, network: { peerCount: 11 }, node: { serviceActive: true } }),
   node("seed-osaka", "seed", { receivedAt: ago(18 * 60), sync: { state: 2, currentHeight: 180011, targetHeight: 180011 } })
 ];
 

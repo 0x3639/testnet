@@ -105,7 +105,7 @@ export const PLAYBOOKS: Record<PlaybookId, PlaybookDefinition> = {
     selectLabel: "Launch a new testnet",
     steps: [
       { id: "logins", label: "Create operator logins", description: "One login per pillar or seed node.", section: "users", done: (i) => i.overview.users.some((u) => u.role === "user") },
-      { id: "nodes", label: "Register nodes", description: "Operators create pillars; you generate seeds.", section: "nodes", done: (i) => i.overview.pillars.length >= i.overview.settings.minPillars },
+      { id: "nodes", label: "Register nodes", description: "Operators create pillars; you generate seeds.", section: "nodes", done: (i) => i.overview.pillars.length >= i.draft.minPillars },
       {
         id: "configure",
         label: "Configure network",

@@ -44,9 +44,19 @@ describe("nodeHealth", () => {
   });
 
   it("uses the supplied clock", () => {
-    const n = node({ receivedAt: ago(10), sync: { state: 2 } });
+    const n = node({ receivedAt: ago(10), sync: { state: 2 }, node: { serviceActive: true } });
     assert.equal(nodeHealth(n, NOW).label, "Online");
     assert.equal(nodeHealth(n, NOW + 10 * 60 * 1000).label, "Stale");
+  });
+
+  it("is Unknown for a report with only receivedAt", () => {
+    const n: TelemetryNode = { id: "n", name: "n", nodeType: "pillar", nodeStatus: { latest: { receivedAt: ago(10) }, historyCount: 1 } };
+    assert.deepEqual(nodeHealth(n, NOW), { label: "Unknown", tone: "muted" });
+  });
+
+  it("is Unknown for an unparseable receivedAt", () => {
+    const n: TelemetryNode = { id: "n", name: "n", nodeType: "pillar", nodeStatus: { latest: { receivedAt: "not-a-date" }, historyCount: 1 } };
+    assert.deepEqual(nodeHealth(n, NOW), { label: "Unknown", tone: "muted" });
   });
 });
 

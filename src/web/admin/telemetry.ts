@@ -77,7 +77,10 @@ export function nodeHealth(node: TelemetryNode, now = Date.now()): NodeHealth {
   const latest = node.nodeStatus?.latest;
   if (!latest) return { label: "No report", tone: "muted" };
 
-  const ageMs = now - Date.parse(latest.receivedAt);
+  const receivedAt = Date.parse(latest.receivedAt);
+  if (Number.isNaN(receivedAt)) return { label: "Unknown", tone: "muted" };
+
+  const ageMs = now - receivedAt;
   if (!Number.isNaN(ageMs) && ageMs > STALE_AFTER_MS) return { label: "Stale", tone: "bad" };
   const skew = clockSkewSeconds(node);
   if (skew !== undefined && Math.abs(skew) > 5 * 60) return { label: "Clock skew", tone: "bad" };
@@ -90,7 +93,8 @@ export function nodeHealth(node: TelemetryNode, now = Date.now()): NodeHealth {
   if (latest.sync?.currentHeight !== undefined && latest.sync.targetHeight !== undefined && latest.sync.targetHeight - latest.sync.currentHeight > 5) {
     return { label: "Lagging", tone: "warn" };
   }
-  return { label: "Online", tone: "ok" };
+  if (latest.node?.serviceActive === true && latest.sync?.state === 2) return { label: "Online", tone: "ok" };
+  return { label: "Unknown", tone: "muted" };
 }
 
 export function isOnline(node: TelemetryNode, now = Date.now()): boolean {
