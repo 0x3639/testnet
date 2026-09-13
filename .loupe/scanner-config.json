@@ -1,0 +1,14 @@
+{
+  "max_concurrent_files": 1,
+  "include_extensions": ["js", "mjs", "ts", "tsx"],
+  "extra_source_paths": [
+    "src",
+    "scripts/create-four-node-devnet.mjs",
+    "Dockerfile",
+    "docker-compose.yml",
+    "docker-compose.coolify.yml",
+    "docker/entrypoint.sh",
+    "docker/caddy/Caddyfile",
+    "vite.config.ts"
+  ]
+}
