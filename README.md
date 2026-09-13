@@ -255,6 +255,8 @@ curl -fsSL "https://<domain>/api/bootstrap/install.sh" | sudo env ZNN_BOOTSTRAP_
 ```
 
 Run it on the node host. The script is intended for the same Linux/systemd style environment supported by `hypercore-one/deployment`.
+
+Re-running the command is safe and is how a node is moved to a new builder URL: the installer waits for any agent run in progress, removes the previous agent configuration (including any stray cron entries that would run the agent), installs the new one, and prints which URL it replaced. A node reports to exactly one builder, the one in the most recently run command. Node status tokens are stored in the builder's state, so after a migration that keeps `app-state.json` the same command and token keep working.
 In **Node Deployment**, the go-zenon repo and branch/tag choose the node source code that gets built. The deployment script repo and branch/tag choose the installer scripts that clone, build, install, and manage the service. The optional go-zenon commit pin is only needed when a release must be tied to an exact commit instead of the branch tip.
 For testnet operators, the bootstrap agent relaxes the deployment script CPU pre-flight minimum from 4 cores to 2 cores by default. Override it by adding `ZNN_DEPLOYMENT_MIN_CPU_CORES="<cores>"` to the bootstrap command if a stricter minimum is needed.
 The agent also changes the deployment script's total RAM check from a hard failure to a warning. A 4 GB VPS can report as `3GiB` after integer rounding, so the script will log the RAM finding and keep going. 4 GiB remains the recommended minimum for builds.

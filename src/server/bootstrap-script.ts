@@ -28,10 +28,53 @@ if ! [[ "$DEPLOYMENT_MIN_CPU_CORES" =~ ^[0-9]+$ ]] || (( DEPLOYMENT_MIN_CPU_CORE
   DEPLOYMENT_MIN_CPU_CORES=2
 fi
 
+CRON_DIR="\${ZNN_CRON_DIR:-/etc/cron.d}"
+CRON_FILE="$CRON_DIR/znn-testnet-agent"
+LOCK_FILE="\${ZNN_LOCK_FILE:-/var/lock/znn-testnet-agent.lock}"
+
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git jq util-linux
 fi
+
+retire_previous_agent() {
+  # A node reports to exactly one builder. If an agent from another builder URL (or an older
+  # install of this one) is configured, replace its configuration so only this builder remains.
+  local previous_url="" stray
+  if [[ -r "$CRON_FILE" ]]; then
+    previous_url="$(grep -E '^ZNN_TESTNET_URL=' "$CRON_FILE" | head -n 1 | cut -d= -f2- || true)"
+  fi
+  if [[ -n "$previous_url" && "$previous_url" != "$BASE_URL" ]]; then
+    echo "Replacing the existing testnet agent configuration: it reported to $previous_url and will now report to $BASE_URL only."
+  elif [[ -n "$previous_url" ]]; then
+    echo "Refreshing the existing testnet agent configuration for $BASE_URL."
+  fi
+  # Any other cron entry that runs the agent (a manual addition or an older layout) would keep
+  # reporting elsewhere, so remove it.
+  for stray in "$CRON_DIR"/*; do
+    [[ -f "$stray" && "$stray" != "$CRON_FILE" ]] || continue
+    if grep -q 'znn-testnet-agent' "$stray" 2>/dev/null; then
+      echo "Removing stray cron entry $stray"
+      rm -f "$stray"
+    fi
+  done
+  if command -v crontab >/dev/null 2>&1 && crontab -l 2>/dev/null | grep -q 'znn-testnet-agent'; then
+    echo "Removing znn-testnet-agent lines from root's crontab"
+    local remaining
+    remaining="$(crontab -l 2>/dev/null | grep -v 'znn-testnet-agent' || true)"
+    printf '%s\\n' "$remaining" | crontab - || true
+  fi
+  rm -f "$CRON_FILE"
+}
+
+# Hold the agent lock while replacing the installation so a run already in progress (possibly a
+# long build for the previous builder) finishes first and no run starts half-configured.
+exec 9>"$LOCK_FILE"
+if ! flock -w 900 9; then
+  echo "A testnet agent run has been in progress for more than 15 minutes; try again later." >&2
+  exit 1
+fi
+retire_previous_agent
 
 STATE_DIR="\${ZNN_AGENT_STATE_DIR:-/var/lib/znn-testnet-agent}"
 mkdir -p "$STATE_DIR"
@@ -709,7 +752,8 @@ AGENT
 
 chmod 700 /usr/local/bin/znn-testnet-agent
 
-cat > /etc/cron.d/znn-testnet-agent <<EOF
+mkdir -p "$CRON_DIR"
+cat > "$CRON_FILE" <<EOF
 ZNN_BOOTSTRAP_TOKEN=$ZNN_BOOTSTRAP_TOKEN
 ZNN_TESTNET_URL=$BASE_URL
 ZNN_DIR=$ZNN_DIR
@@ -719,12 +763,14 @@ ZNN_DEPLOYMENT_MIN_CPU_CORES=$DEPLOYMENT_MIN_CPU_CORES
 ZNN_RPC_URL=$RPC_URL
 ZNN_SERVICE_NAME=$SERVICE_NAME
 ZNN_BOOTSTRAP_TRACE=$BOOTSTRAP_TRACE
-*/1 * * * * root flock -n /var/lock/znn-testnet-agent.lock /usr/local/bin/znn-testnet-agent
+*/1 * * * * root flock -n $LOCK_FILE /usr/local/bin/znn-testnet-agent
 EOF
-chmod 600 /etc/cron.d/znn-testnet-agent
+chmod 600 "$CRON_FILE"
 
-flock -n /var/lock/znn-testnet-agent.lock /usr/local/bin/znn-testnet-agent || true
+# Release the lock before the first run of the new agent.
+exec 9>&-
+flock -n "$LOCK_FILE" /usr/local/bin/znn-testnet-agent || true
 
-echo "Zenon testnet bootstrap installed. The agent will apply the release after Publish Release."
+echo "Zenon testnet bootstrap installed for $BASE_URL. The agent will apply the release after Publish Release."
 `;
 }
