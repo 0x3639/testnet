@@ -17,8 +17,8 @@ let stateUpdateQueue = Promise.resolve();
 
 /** Default genesis start for a fresh install: the first full hour at least 24 hours out, so the draft is never already in the past. */
 export function defaultGenesisTimestampSec(nowMs = Date.now()): number {
-  const hour = 3600;
-  return Math.ceil((Math.floor(nowMs / 1000) + 24 * hour) / hour) * hour;
+  const hourMs = 3600_000;
+  return (Math.ceil((nowMs + 24 * hourMs) / hourMs) * hourMs) / 1000;
 }
 
 function defaultSettings(): NetworkSettings {

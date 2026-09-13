@@ -75,4 +75,11 @@ describe("defaultGenesisTimestampSec", () => {
     assert.ok(value - Math.floor(now / 1000) >= 24 * 3600);
     assert.equal(new Date(value * 1000).toISOString(), "2026-09-14T19:00:00.000Z");
   });
+
+  it("never lands short of 24 hours because of sub-second time", () => {
+    const now = Date.parse("2026-09-13T18:00:00.999Z");
+    const value = defaultGenesisTimestampSec(now);
+    assert.ok(value * 1000 - now >= 24 * 3600_000);
+    assert.equal(new Date(value * 1000).toISOString(), "2026-09-14T19:00:00.000Z");
+  });
 });
