@@ -13,6 +13,7 @@ import { bootstrapInstallScript } from "./bootstrap-script.js";
 import { resolveGitRef } from "./git-refs.js";
 import { genesisSettingsKey, publishInputsKey, settingsSnapshot } from "./settings.js";
 import { AttemptLimiter } from "./rate-limit.js";
+import { BootstrapSecretDownloadLimiter } from "./bootstrap-secret-limit.js";
 import { checkCommit, checkGitRef, checkRepoUrl, loadRepoPolicy, redactUrl, releasePolicyErrors } from "./repo-policy.js";
 import { isPublicIp, probeSeedNode, validateSeedNodeIp } from "./seeders.js";
 import { DEFAULT_DEPLOYMENT_REPO, DEFAULT_GO_ZENON_REPO, readState, updateState } from "./storage.js";
@@ -58,6 +59,7 @@ const REPO_POLICY = loadRepoPolicy(process.env, [DEFAULT_GO_ZENON_REPO, DEFAULT_
 const LOGIN_WINDOW_MS = 15 * 60_000;
 const loginLimiterByAccountAndAddress = new AttemptLimiter({ maxAttempts: 10, windowMs: LOGIN_WINDOW_MS });
 const loginLimiterByAddress = new AttemptLimiter({ maxAttempts: 50, windowMs: LOGIN_WINDOW_MS });
+const bootstrapSecretDownloadLimiter = new BootstrapSecretDownloadLimiter();
 const MAX_CONCURRENT_LOGINS = 8;
 let loginsInFlight = 0;
 
@@ -683,7 +685,7 @@ function bootstrapManifest(request: express.Request, published: PublishedArtifac
 async function withBootstrapNode(
   request: express.Request,
   response: express.Response,
-  handler: (state: AppState, node: BootstrapNode) => Promise<void> | void
+  handler: (state: AppState, node: BootstrapNode, tokenHash: string) => Promise<void> | void
 ): Promise<void> {
   const token = bearerToken(request);
   if (!token) {
@@ -695,17 +697,25 @@ async function withBootstrapNode(
   const state = await readState();
   const pillar = state.pillars.find((candidate) => candidate.statusTokenHash === tokenHash);
   if (pillar) {
-    await handler(state, { nodeType: "pillar", pillar });
+    await handler(state, { nodeType: "pillar", pillar }, tokenHash);
     return;
   }
 
   const seedNode = state.seedNodes.find((candidate) => candidate.statusTokenHash === tokenHash);
   if (seedNode) {
-    await handler(state, { nodeType: "seed", seedNode });
+    await handler(state, { nodeType: "seed", seedNode }, tokenHash);
     return;
   }
 
   response.status(401).json({ error: "Invalid bootstrap token" });
+}
+
+function admitBootstrapSecretDownload(response: express.Response, tokenHash: string): boolean {
+  const retryAfterMs = bootstrapSecretDownloadLimiter.admit(tokenHash);
+  if (retryAfterMs === 0) return true;
+  response.setHeader("Retry-After", String(Math.ceil(retryAfterMs / 1000)));
+  response.status(429).json({ error: "Too many secret downloads; retry later" });
+  return false;
 }
 
 
@@ -932,21 +942,23 @@ async function main() {
   });
 
   app.get("/api/bootstrap/producer.json", async (request, response) => {
-    await withBootstrapNode(request, response, (_state, node) => {
+    await withBootstrapNode(request, response, (_state, node, tokenHash) => {
       if (node.nodeType !== "pillar") {
         response.status(404).json({ error: "Seed nodes do not have producer wallets" });
         return;
       }
+      if (!admitBootstrapSecretDownload(response, tokenHash)) return;
       sendJsonFile(response, node.pillar.producerWallet.keyFile);
     });
   });
 
   app.get("/api/bootstrap/producer-password.txt", async (request, response) => {
-    await withBootstrapNode(request, response, (_state, node) => {
+    await withBootstrapNode(request, response, (_state, node, tokenHash) => {
       if (node.nodeType !== "pillar") {
         response.status(404).json({ error: "Seed nodes do not have producer wallets" });
         return;
       }
+      if (!admitBootstrapSecretDownload(response, tokenHash)) return;
       response.setHeader("Content-Type", "text/plain; charset=utf-8");
       response.setHeader("Cache-Control", "no-store");
       response.send(`${producerPassword(node.pillar)}\n`);
@@ -954,11 +966,12 @@ async function main() {
   });
 
   app.get("/api/bootstrap/network-private-key", async (request, response) => {
-    await withBootstrapNode(request, response, (_state, node) => {
+    await withBootstrapNode(request, response, (_state, node, tokenHash) => {
       if (node.nodeType !== "seed") {
         response.status(404).json({ error: "Pillar nodes do not have managed network private keys" });
         return;
       }
+      if (!admitBootstrapSecretDownload(response, tokenHash)) return;
       response.setHeader("Content-Type", "text/plain; charset=utf-8");
       response.setHeader("Cache-Control", "no-store");
       response.send(`${decryptText(node.seedNode.networkPrivateKeyCipher)}\n`);
