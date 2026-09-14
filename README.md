@@ -50,7 +50,7 @@ Both paths preapprove the same release repositories (`zenon-network/go-zenon`, `
 ## Planning Docs
 
 - [Genesis release automation plan](docs/genesis-release-automation-plan.md): proposed event history, configurable `go-zenon` release targets, operator-specific bootstrap scripts, and node polling automation.
-- [Cloudflare origin lockdown](docs/cloudflare-origin-lockdown.md): the Cloudflare proxy settings in use for `testnet.zenon.info`, and the planned Authenticated Origin Pulls procedure that makes Coolify's proxy accept that hostname only through Cloudflare.
+- [Cloudflare origin lockdown](docs/cloudflare-origin-lockdown.md): the Cloudflare proxy settings in use for `testnet.zenon.info`, and the planned Authenticated Origin Pulls procedure that makes Coolify's proxy accept that hostname only from Cloudflare's network.
 
 ## Important Security Notes
 
@@ -262,7 +262,7 @@ To move an existing testnet builder to Coolify without losing registrations:
 
 ### Putting Cloudflare In Front
 
-The public hostname can be proxied through Cloudflare (orange cloud) with the encryption mode on **Full (strict)**, which Coolify's Let's Encrypt certificate satisfies. Because the node agents are plain `curl` clients, a WAF custom rule must skip bot and rate-limit checks for the agent and published-file paths, and Bot Fight Mode must stay off. The exact rule, and the planned procedure for making the origin refuse `testnet.zenon.info` connections that did not come through Cloudflare (Authenticated Origin Pulls with a per-router Traefik TLS option, so other sites on the same Coolify host are unaffected), are documented in [docs/cloudflare-origin-lockdown.md](docs/cloudflare-origin-lockdown.md).
+The public hostname can be proxied through Cloudflare (orange cloud) with the encryption mode on **Full (strict)**, which Coolify's Let's Encrypt certificate satisfies. Because the node agents are plain `curl` clients, a WAF custom rule must skip bot and rate-limit checks for the agent and published-file paths, and Bot Fight Mode must stay off. The exact rule, and the planned procedure for making the origin refuse `testnet.zenon.info` connections that did not come from Cloudflare's network (Authenticated Origin Pulls with a per-router Traefik TLS option, so other sites on the same Coolify host are unaffected), are documented in [docs/cloudflare-origin-lockdown.md](docs/cloudflare-origin-lockdown.md).
 
 ## Admin Workflow
 
