@@ -50,6 +50,7 @@ Both paths preapprove the same release repositories (`zenon-network/go-zenon`, `
 ## Planning Docs
 
 - [Genesis release automation plan](docs/genesis-release-automation-plan.md): proposed event history, configurable `go-zenon` release targets, operator-specific bootstrap scripts, and node polling automation.
+- [Cloudflare origin lockdown](docs/cloudflare-origin-lockdown.md): the Cloudflare proxy settings in use for `testnet.zenon.info`, and the planned Authenticated Origin Pulls procedure that makes Coolify's proxy accept that hostname only from Cloudflare's network.
 
 ## Important Security Notes
 
@@ -258,6 +259,10 @@ To move an existing testnet builder to Coolify without losing registrations:
 3. Set `APP_SECRET` in Coolify to exactly the old value; a different secret cannot decrypt the stored wallet passwords, node keys, and status tokens.
 4. Start the resource, sign in, and click **Publish Release** before operators re-run the bootstrap on their nodes: the current agent only accepts pinned releases.
 5. Have every operator re-run the bootstrap command shown on their operator page on the new site. Re-running it replaces the node's previous agent configuration so the node reports only to the new URL (see [Operator Bootstrap](#operator-bootstrap)). Until an operator does this, that node keeps reporting to the old URL and will not receive releases published from the new site.
+
+### Putting Cloudflare In Front
+
+The public hostname can be proxied through Cloudflare (orange cloud) with the encryption mode on **Full (strict)**, which Coolify's Let's Encrypt certificate satisfies. Because the node agents are plain `curl` clients, a WAF custom rule must skip bot and rate-limit checks for the agent and published-file paths, and Bot Fight Mode must stay off. The exact rule, and the planned procedure for making the origin refuse `testnet.zenon.info` connections that did not come from Cloudflare's network (Authenticated Origin Pulls with a per-router Traefik TLS option, so other sites on the same Coolify host are unaffected), are documented in [docs/cloudflare-origin-lockdown.md](docs/cloudflare-origin-lockdown.md).
 
 ## Admin Workflow
 
