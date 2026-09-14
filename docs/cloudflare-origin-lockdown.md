@@ -49,7 +49,9 @@ The certificate Cloudflare presents in this setup (Cloudflare calls it global Au
 - It does not prove the request passed through the `zenon.info` zone. Another Cloudflare customer who points a proxied hostname of their own at this origin IP and uses Cloudflare features that override the SNI and `Host` header sent to the origin would present the same certificate. The zone-level protections configured in this account (the WAF custom rule, rate limiting, Bot Fight Mode) do not apply to such traffic.
 - The lockdown therefore removes direct-to-origin traffic; it does not replace the app's own authentication and abuse controls, which must stay in place.
 
-If account-specific origin authentication is ever required, Cloudflare's zone-level or per-hostname Authenticated Origin Pulls with a customer-uploaded certificate provides it: the origin then verifies a certificate that only this account holds. That needs a private CA, an API upload of the certificate, and a rotation procedure of its own, and is not part of this plan.
+The app separately limits authenticated secret downloads to 60 requests per node token per 15 minutes and returns `429` with `Retry-After` when the limit is reached. This in-memory bound does not protect a secret after its token is disclosed; rotate compromised node credentials and re-run bootstrap.
+
+If account-specific origin authentication is ever required, Cloudflare's zone-level or per-hostname Authenticated Origin Pulls with a customer-uploaded certificate provides it: the origin then verifies a certificate that only this account holds. That needs a private CA, certificate upload through the dashboard or API, and a rotation procedure of its own, and is not part of this plan.
 
 ## Procedure
 
@@ -59,7 +61,7 @@ Do the steps in this order. Steps 1 to 3 change nothing visible; step 4 turns en
 
 Zone `zenon.info` → **SSL/TLS** → **Origin Server** → **Authenticated Origin Pulls** → On.
 
-The dashboard toggle is zone-wide. That is fine: other hostnames in the zone receive the client certificate too, and their Traefik routers ignore it because they carry no `clientAuth` option. The zone-level and per-hostname modes with a customer-uploaded certificate exist only through the API; they are needed only for account-specific authentication (see [What This Guarantees](#what-this-guarantees)).
+The dashboard toggle is zone-wide. That is fine: other hostnames in the zone receive the client certificate too, and their Traefik routers ignore it because they carry no `clientAuth` option. The zone-level and per-hostname modes with a customer-uploaded certificate can be configured in the dashboard or through the API; they are needed only for account-specific authentication (see [What This Guarantees](#what-this-guarantees)).
 
 ### 2. Put the Cloudflare CA on the Coolify host
 
@@ -152,4 +154,4 @@ Coolify's Let's Encrypt resolver uses the HTTP-01 challenge on port 80, which is
 
 ## Follow-Up: Real Client IPs
 
-With the orange cloud on, Traefik's peer address is a Cloudflare edge, and the app's `TRUST_PROXY=uniquelocal` setting trusts only the proxy hop, so the login rate limiter (`AttemptLimiter`) currently keys on Cloudflare edge addresses. Once Authenticated Origin Pulls guarantees that every `testnet.zenon.info` connection came from Cloudflare's network, the `CF-Connecting-IP` header can be trusted for that router, because Cloudflare's edge sets that header itself on every proxied request, whichever zone the request passed through. That is the only downstream trust this plan places in the lockdown; nothing in the app should assume a request also passed this zone's WAF rules. The change is app-side (read the header only when the immediate peer is trusted and the header is present) and should be made after step 5 passes, not before.
+With the orange cloud on, Traefik's peer address is a Cloudflare edge, and the app's `TRUST_PROXY=uniquelocal` setting trusts only the proxy hop, so the login rate limiter (`AttemptLimiter`) currently keys on Cloudflare edge addresses. After step 5 confirms the intended router binding, a future app-side change may use `CF-Connecting-IP` for client-IP attribution and rate limiting on ordinary proxied requests, but only when the immediate proxy path is trusted. It must not use the header for identity or authentication: Cloudflare documents Worker subrequests where the value may be altered or replaced with a Worker address. Global AOP authenticates the Cloudflare edge, not the end user or this zone's WAF processing. This follow-up is not implemented by the procedure above.
