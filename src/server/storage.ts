@@ -55,12 +55,36 @@ function defaultState(): AppState {
   };
 }
 
-function mergeDefaultSporks(sporks: NetworkSettings["sporks"], currentVersion?: number): NetworkSettings["sporks"] {
+// Drafts saved before defaults version 3 carried the dynamic-plasma and libp2p placeholder IDs
+// the wrong way round relative to go-zenon (issue #13). Nodes act on the ID, so the record labelled
+// dynamic-plasma actually activated libp2p. Swap the IDs back, keyed on the default names, and keep
+// everything else the admin configured for each record.
+const SWAPPED_SPORK_IDS_BEFORE_VERSION = 3;
+const SPORK_ID_REPAIRS: Record<string, { from: string; to: string }> = {
+  "dynamic-plasma": {
+    from: "0000000000000000000000000000000000000000000000000000000000000001",
+    to: "0000000000000000000000000000000000000000000000000000000000000002"
+  },
+  libp2p: {
+    from: "0000000000000000000000000000000000000000000000000000000000000002",
+    to: "0000000000000000000000000000000000000000000000000000000000000001"
+  }
+};
+
+function repairSwappedSporkIds(sporks: NetworkSettings["sporks"]): NetworkSettings["sporks"] {
+  return sporks.map((spork) => {
+    const repair = SPORK_ID_REPAIRS[spork.name];
+    return repair && spork.id.toLowerCase() === repair.from ? { ...spork, id: repair.to } : spork;
+  });
+}
+
+export function mergeDefaultSporks(sporks: NetworkSettings["sporks"], currentVersion?: number): NetworkSettings["sporks"] {
   if (currentVersion && currentVersion >= DEFAULT_SPORKS_VERSION) return sporks;
 
-  const existingIds = new Set(sporks.map((spork) => spork.id.toLowerCase()));
+  const repaired = (currentVersion ?? 0) < SWAPPED_SPORK_IDS_BEFORE_VERSION ? repairSwappedSporkIds(sporks) : sporks;
+  const existingIds = new Set(repaired.map((spork) => spork.id.toLowerCase()));
   return [
-    ...sporks,
+    ...repaired,
     ...DEFAULT_SPORKS.filter((spork) => !existingIds.has(spork.id.toLowerCase())).map((spork) => ({ ...spork }))
   ];
 }
