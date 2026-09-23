@@ -87,6 +87,21 @@ describe("mergeDefaultSporks", () => {
     assert.deepEqual(mergeDefaultSporks([...originalThree, custom], 2), [...originalThree, custom]);
   });
 
+  it("leaves a renamed record that was corrected by hand alone when its counterpart was removed", () => {
+    const draft = [...originalThree, libp2p(LIBP2P_SPORK_ID, "my-network"), governance];
+    assert.deepEqual(mergeDefaultSporks(draft, 2), draft);
+  });
+
+  it("leaves a draft alone when both defaults were renamed, since it cannot tell corrected from swapped", () => {
+    const draft = [...originalThree, dynamicPlasma(DYNAMIC_PLASMA_SPORK_ID, "my-plasma"), libp2p(LIBP2P_SPORK_ID, "my-network"), governance];
+    assert.deepEqual(mergeDefaultSporks(draft, 2), draft);
+  });
+
+  it("preserves a duplicate-ID draft unchanged, leaving it to the finalize blockers", () => {
+    const draft = [...originalThree, dynamicPlasma(DYNAMIC_PLASMA_SPORK_ID), libp2p(DYNAMIC_PLASMA_SPORK_ID), governance];
+    assert.deepEqual(mergeDefaultSporks(draft, 2), draft);
+  });
+
   it("repairs an undefined-version draft that already carried the swapped pair", () => {
     const merged = mergeDefaultSporks([...originalThree, dynamicPlasma(LIBP2P_SPORK_ID), libp2p(DYNAMIC_PLASMA_SPORK_ID)], undefined);
     assert.deepEqual(merged, [...originalThree, dynamicPlasma(DYNAMIC_PLASMA_SPORK_ID), libp2p(LIBP2P_SPORK_ID), { ...governance }]);
@@ -121,6 +136,22 @@ describe("normalizeState spork migration", () => {
   it("keeps a finalized genesis when the migration leaves the sporks unchanged", () => {
     const state = normalizeState(stateWith([...originalThree, dynamicPlasma(DYNAMIC_PLASMA_SPORK_ID), libp2p(LIBP2P_SPORK_ID), governance], 2));
     assert.deepEqual(state.finalizedGenesis, finalizedGenesis);
+  });
+
+  it("discards a finalized genesis when the stored sporks carry duplicate IDs", () => {
+    const state = normalizeState(stateWith([...originalThree, dynamicPlasma(DYNAMIC_PLASMA_SPORK_ID), libp2p(DYNAMIC_PLASMA_SPORK_ID), governance], 2));
+    assert.equal(state.finalizedGenesis, undefined);
+  });
+
+  it("preserves an explicitly empty version-2 spork list instead of restoring the defaults", () => {
+    const state = normalizeState(stateWith([], 2));
+    assert.deepEqual(state.settings.sporks, []);
+    assert.deepEqual(state.finalizedGenesis, finalizedGenesis);
+  });
+
+  it("fills in the defaults when the stored settings have no spork list at all", () => {
+    const state = normalizeState({ defaultSporksVersion: 2, settings: {} as AppState["settings"] });
+    assert.deepEqual(ids(state.settings.sporks), ids([...DEFAULT_SPORKS]));
   });
 
   it("keeps a finalized genesis on a current-version state", () => {

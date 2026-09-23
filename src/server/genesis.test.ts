@@ -56,6 +56,14 @@ describe("finalizeBlockers", () => {
     assert.match(blockers[0], /in the past/);
   });
 
+  it("refuses duplicate spork IDs", () => {
+    const spork = { id: "ab".repeat(32), name: "a", description: "", activated: true, enforcementHeight: 0 };
+    const sporks = [spork, { ...spork, name: "b", id: spork.id.toUpperCase() }];
+    const blockers = finalizeBlockers({ settings: { ...settings, sporks }, pillars: [pillar("p1"), pillar("p2")] }, NOW);
+    assert.equal(blockers.length, 1);
+    assert.match(blockers[0], /duplicate spork ID/);
+  });
+
   it("refuses a missing spork address", () => {
     const blockers = finalizeBlockers({ settings: { ...settings, sporkAddress: "" }, pillars: [pillar("p1"), pillar("p2")] }, NOW);
     assert.deepEqual(blockers, ["the spork address is missing"]);

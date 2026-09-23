@@ -11,6 +11,7 @@ import {
   TEST_SPORKS_ADDED_VERSION
 } from "./constants.js";
 import { multiaddrFromEnode, multiaddrFromPublicKey } from "./libp2p.js";
+import { duplicateSporkIds } from "./settings.js";
 import type { AppState, NetworkSettings } from "../shared/types.js";
 
 const DATA_DIR = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
@@ -65,15 +66,20 @@ function defaultState(): AppState {
 
 // Drafts saved before defaults version 3 carried the dynamic-plasma and libp2p placeholder IDs
 // the wrong way round relative to go-zenon (issue #13). Nodes act on the ID, so the record labelled
-// dynamic-plasma actually activated libp2p. Swap the two IDs on whichever records carry them, so a
-// record keeps meaning what the admin configured it to mean even if they renamed it. A draft where
-// either default already carries its correct ID was fixed by hand and is left alone.
+// dynamic-plasma actually activated libp2p. The swap is only applied when the draft still shows the
+// bug (a default-named record carrying the wrong ID) and nothing shows a hand correction (a
+// default-named record carrying its right ID). It then swaps the two IDs on whichever records carry
+// them, so a record keeps meaning what the admin configured it to mean even if they renamed it. A
+// draft with no default-named record is ambiguous and is left for the admin to review.
 function repairSwappedSporkIds(sporks: NetworkSettings["sporks"]): NetworkSettings["sporks"] {
   const isId = (spork: NetworkSettings["sporks"][number], id: string) => spork.id.toLowerCase() === id;
-  const alreadyCorrected = sporks.some(
+  const showsBug = sporks.some(
+    (spork) => (spork.name === "dynamic-plasma" && isId(spork, LIBP2P_SPORK_ID)) || (spork.name === "libp2p" && isId(spork, DYNAMIC_PLASMA_SPORK_ID))
+  );
+  const showsCorrection = sporks.some(
     (spork) => (spork.name === "dynamic-plasma" && isId(spork, DYNAMIC_PLASMA_SPORK_ID)) || (spork.name === "libp2p" && isId(spork, LIBP2P_SPORK_ID))
   );
-  if (alreadyCorrected) return sporks;
+  if (!showsBug || showsCorrection) return sporks;
   return sporks.map((spork) => {
     if (isId(spork, LIBP2P_SPORK_ID)) return { ...spork, id: DYNAMIC_PLASMA_SPORK_ID };
     if (isId(spork, DYNAMIC_PLASMA_SPORK_ID)) return { ...spork, id: LIBP2P_SPORK_ID };
@@ -116,11 +122,14 @@ export function normalizeState(state: Partial<AppState>): AppState {
   const defaults = defaultState();
   const settingsDefaults = defaultSettings();
   const settings = state.settings ?? ({} as Partial<NetworkSettings>);
-  const storedSporks = settings.sporks?.length ? settings.sporks : settingsDefaults.sporks;
+  // An explicitly empty list is an admin choice and stays empty; only a missing list gets the defaults.
+  const storedSporks = settings.sporks ?? settingsDefaults.sporks;
   const sporks = mergeDefaultSporks(storedSporks, state.defaultSporksVersion);
   // A finalized genesis bakes in the sporks. If the migration changed them it is stale and would
-  // otherwise be preferred over the corrected settings by preview, download and publish.
-  const finalizedGenesis = JSON.stringify(sporks) === JSON.stringify(storedSporks) ? state.finalizedGenesis : undefined;
+  // otherwise be preferred over the corrected settings by preview, download and publish. One that
+  // contains duplicate IDs must not be published either; finalizeBlockers keeps it from coming back.
+  const sporksUsable = JSON.stringify(sporks) === JSON.stringify(storedSporks) && duplicateSporkIds(sporks).length === 0;
+  const finalizedGenesis = sporksUsable ? state.finalizedGenesis : undefined;
   const seeders = settings.seeders ?? settingsDefaults.seeders;
   const seedNodes = (state.seedNodes ?? []).map((seedNode) => ({
     ...seedNode,
