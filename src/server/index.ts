@@ -11,7 +11,7 @@ import { buildPillarPackage, buildSeedNodePackage, buildSporkPackage } from "./p
 import { enodeFromPublicKey, multiaddrFromEnode, multiaddrFromPublicKey } from "./libp2p.js";
 import { bootstrapInstallScript } from "./bootstrap-script.js";
 import { resolveGitRef } from "./git-refs.js";
-import { genesisSettingsKey, publishInputsKey, settingsSnapshot } from "./settings.js";
+import { duplicateSporkIds, genesisSettingsKey, publishInputsKey, settingsSnapshot } from "./settings.js";
 import { AttemptLimiter } from "./rate-limit.js";
 import { checkCommit, checkGitRef, checkRepoUrl, loadRepoPolicy, redactUrl, releasePolicyErrors } from "./repo-policy.js";
 import { isPublicIp, probeSeedNode, validateSeedNodeIp } from "./seeders.js";
@@ -159,15 +159,19 @@ const settingsSchema = z.object({
   wipeDataOnPublish: z.boolean().default(false),
   seeders: z.array(z.string().trim().min(1)).max(100),
   bootstrapPeers: z.array(z.string().trim().min(1)).max(100).optional(),
-  sporks: z.array(
-    z.object({
-      id: z.string().regex(/^[0-9a-fA-F]{64}$/),
-      name: z.string().min(1).max(80),
-      description: z.string().max(400),
-      activated: z.boolean(),
-      enforcementHeight: z.number().int().min(0)
-    })
-  ),
+  sporks: z
+    .array(
+      z.object({
+        id: z.string().regex(/^[0-9a-fA-F]{64}$/),
+        name: z.string().min(1).max(80),
+        description: z.string().max(400),
+        activated: z.boolean(),
+        enforcementHeight: z.number().int().min(0)
+      })
+    )
+    .refine((sporks) => duplicateSporkIds(sporks).length === 0, {
+      message: "Spork IDs must be unique; go-zenon stores sporks by ID, so a duplicate would overwrite the other record"
+    }),
   genesisFunds: z
     .array(
       z.object({

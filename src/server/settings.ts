@@ -1,4 +1,4 @@
-import type { AppState, NetworkSettings, NetworkSettingsSnapshot, PillarRecord } from "../shared/types.js";
+import type { AppState, NetworkSettings, NetworkSettingsSnapshot, PillarRecord, SporkRecord } from "../shared/types.js";
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -61,4 +61,16 @@ export function publishInputsKey(state: Pick<AppState, "settings" | "pillars" | 
     finalizedAt: state.finalizedGenesis?.finalizedAt ?? null,
     finalizedGenesis: state.finalizedGenesis?.genesis ?? null
   });
+}
+
+/** Spork IDs (lower-cased) that occur more than once. go-zenon stores sporks by ID, so a duplicate silently overwrites its twin. */
+export function duplicateSporkIds(sporks: Pick<SporkRecord, "id">[]): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const spork of sporks) {
+    const id = spork.id.toLowerCase();
+    if (seen.has(id)) duplicates.add(id);
+    seen.add(id);
+  }
+  return Array.from(duplicates);
 }

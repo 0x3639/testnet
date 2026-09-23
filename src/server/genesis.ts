@@ -11,6 +11,7 @@ import {
   TOKEN_CONTRACT,
   ZNN_ZTS
 } from "./constants.js";
+import { duplicateSporkIds } from "./settings.js";
 import { stableHashHex } from "./crypto.js";
 import type { AppState, NetworkSettings, PillarRecord, PublicPillar, ReadinessCheck } from "../shared/types.js";
 
@@ -272,6 +273,10 @@ export function finalizeBlockers(state: Pick<AppState, "settings" | "pillars">, 
   }
   if (!state.settings.sporkAddress) {
     blockers.push("the spork address is missing");
+  }
+  const duplicates = duplicateSporkIds(state.settings.sporks);
+  if (duplicates.length) {
+    blockers.push(`duplicate spork ID${duplicates.length > 1 ? "s" : ""} ${duplicates.join(", ")}; nodes store sporks by ID, so fix the list in Network`);
   }
   return blockers;
 }

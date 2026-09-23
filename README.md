@@ -447,7 +447,7 @@ The app defaults to:
 - `minPillars = 3`
 - `expectedPillars = 4`
 - Accelerator, HTLC, and Bridge/Liquidity sporks active at height `0`
-- DS test sporks `dynamic-plasma`, `libp2p`, and `governance` present but inactive by default, with activation heights `10`, `20`, and `30`
+- DS test sporks `dynamic-plasma`, `libp2p`, and `governance` present but inactive by default, with activation heights `10`, `20`, and `30`. Their placeholder IDs match go-zenon's `common/types/spork.go` (`...0002` is `DynamicPlasmaSpork`, `...0001` is `Libp2pSpork`); nodes select a feature by ID, not by name, so keep them in sync with the pinned go-zenon commit
 
 Admins can add, edit, activate/deactivate, and remove sporks from the `genesis.json` tab in the admin preview panel. Each spork is written into `SporkConfig.Sporks` in the next generated `genesis.json` with its configured ID, name, description, activation flag, and activation height.
 
