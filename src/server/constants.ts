@@ -13,8 +13,11 @@ export const PILLAR_LIQUID_ZNN = 50_000;
 export const PILLAR_LIQUID_QSR = 500_000;
 export const FUSED_QSR_PER_ADDRESS = 1_000;
 // Bump when DEFAULT_SPORKS changes so mergeDefaultSporks can migrate stored drafts.
+// Version 2 added the dynamic-plasma, libp2p and governance test sporks.
 // Version 3 swapped the dynamic-plasma and libp2p placeholder IDs to match go-zenon (issue #13).
 export const DEFAULT_SPORKS_VERSION = 3;
+export const TEST_SPORKS_ADDED_VERSION = 2;
+export const SPORK_IDS_CORRECTED_VERSION = 3;
 
 export const DEFAULT_GENESIS_FUNDS = [
   {
@@ -25,9 +28,11 @@ export const DEFAULT_GENESIS_FUNDS = [
   }
 ];
 
-// The placeholder IDs below must match common/types/spork.go in go-zenon exactly:
-// nodes select a feature by spork ID, never by the human-readable name.
-//   ...0001 = Libp2pSpork, ...0002 = DynamicPlasmaSpork
+// Placeholder spork IDs compiled into go-zenon common/types/spork.go. They must match the pinned
+// go-zenon commit exactly: nodes select a feature by spork ID, never by the human-readable name.
+export const LIBP2P_SPORK_ID = "0000000000000000000000000000000000000000000000000000000000000001";
+export const DYNAMIC_PLASMA_SPORK_ID = "0000000000000000000000000000000000000000000000000000000000000002";
+
 export const DEFAULT_SPORKS = [
   {
     id: "6d2b1e6cb4025f2f45533f0fe22e9b7ce2014d91cc960471045fa64eee5a6ba3",
@@ -51,14 +56,14 @@ export const DEFAULT_SPORKS = [
     enforcementHeight: 0
   },
   {
-    id: "0000000000000000000000000000000000000000000000000000000000000002",
+    id: DYNAMIC_PLASMA_SPORK_ID,
     name: "dynamic-plasma",
     description: "Activates Dynamic Plasma",
     activated: false,
     enforcementHeight: 10
   },
   {
-    id: "0000000000000000000000000000000000000000000000000000000000000001",
+    id: LIBP2P_SPORK_ID,
     name: "libp2p",
     description: "Activates the libp2p networking stack",
     activated: false,

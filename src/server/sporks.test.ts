@@ -1,53 +1,130 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_SPORKS, DEFAULT_SPORKS_VERSION } from "./constants.js";
-import { mergeDefaultSporks } from "./storage.js";
+import { DEFAULT_SPORKS, DEFAULT_SPORKS_VERSION, DYNAMIC_PLASMA_SPORK_ID, LIBP2P_SPORK_ID } from "./constants.js";
+import { duplicateSporkIds } from "./settings.js";
+import { mergeDefaultSporks, normalizeState } from "./storage.js";
+import type { AppState, SporkRecord } from "../shared/types.js";
 
-// Placeholder spork IDs compiled into go-zenon common/types/spork.go.
-// Nodes select a feature by ID, never by name, so these must match exactly.
-const LIBP2P_SPORK_ID = "0000000000000000000000000000000000000000000000000000000000000001";
-const DYNAMIC_PLASMA_SPORK_ID = "0000000000000000000000000000000000000000000000000000000000000002";
+// Provenance: placeholder spork IDs compiled into go-zenon at commit
+// 32b96d9241a53966c31c310bd637e57562300255 (dev branch), common/types/spork.go lines 31 and 37:
+//   Libp2pSpork        = NewImplementedSpork("...0001")
+//   DynamicPlasmaSpork = NewImplementedSpork("...0002")
+// Nodes select a feature by ID, never by name, so these literals are the contract. Re-check them
+// against the pinned go-zenon commit whenever the release target changes.
+const UPSTREAM_LIBP2P_SPORK_ID = "0000000000000000000000000000000000000000000000000000000000000001";
+const UPSTREAM_DYNAMIC_PLASMA_SPORK_ID = "0000000000000000000000000000000000000000000000000000000000000002";
+
+const dynamicPlasma = (id: string, name = "dynamic-plasma"): SporkRecord => ({
+  id,
+  name,
+  description: "Activates Dynamic Plasma",
+  activated: true,
+  enforcementHeight: 10
+});
+const libp2p = (id: string, name = "libp2p"): SporkRecord => ({
+  id,
+  name,
+  description: "Activates the libp2p networking stack",
+  activated: false,
+  enforcementHeight: 20
+});
+const governance: SporkRecord = {
+  id: "0000000000000000000000000000000000000000000000000000000000000003",
+  name: "governance",
+  description: "Activates the governance stack",
+  activated: false,
+  enforcementHeight: 30
+};
+const originalThree = DEFAULT_SPORKS.slice(0, 3).map((spork) => ({ ...spork }));
+const ids = (sporks: SporkRecord[]) => sporks.map((spork) => spork.id);
 
 describe("default sporks", () => {
-  it("assigns the go-zenon DynamicPlasmaSpork ID to the dynamic-plasma record", () => {
-    const spork = DEFAULT_SPORKS.find((entry) => entry.name === "dynamic-plasma");
-    assert.equal(spork?.id, DYNAMIC_PLASMA_SPORK_ID);
+  it("uses the go-zenon placeholder IDs", () => {
+    assert.equal(LIBP2P_SPORK_ID, UPSTREAM_LIBP2P_SPORK_ID);
+    assert.equal(DYNAMIC_PLASMA_SPORK_ID, UPSTREAM_DYNAMIC_PLASMA_SPORK_ID);
   });
 
-  it("assigns the go-zenon Libp2pSpork ID to the libp2p record", () => {
-    const spork = DEFAULT_SPORKS.find((entry) => entry.name === "libp2p");
-    assert.equal(spork?.id, LIBP2P_SPORK_ID);
+  it("assigns the DynamicPlasmaSpork ID to dynamic-plasma and the Libp2pSpork ID to libp2p", () => {
+    assert.equal(DEFAULT_SPORKS.find((entry) => entry.name === "dynamic-plasma")?.id, UPSTREAM_DYNAMIC_PLASMA_SPORK_ID);
+    assert.equal(DEFAULT_SPORKS.find((entry) => entry.name === "libp2p")?.id, UPSTREAM_LIBP2P_SPORK_ID);
+  });
+
+  it("has no duplicate IDs", () => {
+    assert.deepEqual(duplicateSporkIds([...DEFAULT_SPORKS]), []);
   });
 });
 
 describe("mergeDefaultSporks", () => {
-  const swappedDraft = [
-    { id: LIBP2P_SPORK_ID, name: "dynamic-plasma", description: "Activates Dynamic Plasma", activated: true, enforcementHeight: 10 },
-    { id: DYNAMIC_PLASMA_SPORK_ID, name: "libp2p", description: "Activates the libp2p networking stack", activated: false, enforcementHeight: 20 }
-  ];
+  const swappedDraft = [...originalThree, dynamicPlasma(LIBP2P_SPORK_ID), libp2p(DYNAMIC_PLASMA_SPORK_ID), governance];
+  const correctedDraft = [...originalThree, dynamicPlasma(DYNAMIC_PLASMA_SPORK_ID), libp2p(LIBP2P_SPORK_ID), governance];
 
   it("repairs the swapped IDs of a version-2 draft while keeping each record's activation and height", () => {
-    const sporks = mergeDefaultSporks(swappedDraft, 2);
-    const dynamicPlasma = sporks.find((entry) => entry.name === "dynamic-plasma");
-    const libp2p = sporks.find((entry) => entry.name === "libp2p");
-    assert.deepEqual(dynamicPlasma, { ...swappedDraft[0], id: DYNAMIC_PLASMA_SPORK_ID });
-    assert.deepEqual(libp2p, { ...swappedDraft[1], id: LIBP2P_SPORK_ID });
+    assert.deepEqual(mergeDefaultSporks(swappedDraft, 2), correctedDraft);
   });
 
-  it("still appends default sporks missing from an older draft", () => {
-    const sporks = mergeDefaultSporks(swappedDraft, 2);
-    assert.ok(sporks.some((entry) => entry.name === "governance"));
-    assert.equal(sporks.length, DEFAULT_SPORKS.length);
+  it("leaves a version-2 draft that was already corrected by hand alone", () => {
+    assert.deepEqual(mergeDefaultSporks(correctedDraft, 2), correctedDraft);
   });
 
-  it("leaves a draft with a swapped-looking record alone once it is on the current version", () => {
-    const sporks = mergeDefaultSporks(swappedDraft, DEFAULT_SPORKS_VERSION);
-    assert.deepEqual(sporks, swappedDraft);
+  it("leaves a draft on the current version alone even when it looks swapped", () => {
+    assert.deepEqual(mergeDefaultSporks(swappedDraft, DEFAULT_SPORKS_VERSION), swappedDraft);
   });
 
-  it("does not touch records an admin gave other names", () => {
-    const custom = [{ id: LIBP2P_SPORK_ID, name: "my-spork", description: "", activated: false, enforcementHeight: 5 }];
-    const sporks = mergeDefaultSporks(custom, 2);
-    assert.deepEqual(sporks[0], custom[0]);
+  it("swaps by ID when a default was renamed, without producing duplicate IDs or re-adding the default", () => {
+    const draft = [...originalThree, dynamicPlasma(LIBP2P_SPORK_ID, "my-plasma"), libp2p(DYNAMIC_PLASMA_SPORK_ID), governance];
+    const merged = mergeDefaultSporks(draft, 2);
+    assert.deepEqual(merged, [...originalThree, dynamicPlasma(DYNAMIC_PLASMA_SPORK_ID, "my-plasma"), libp2p(LIBP2P_SPORK_ID), governance]);
+    assert.deepEqual(duplicateSporkIds(merged), []);
+  });
+
+  it("does not restore a default an admin removed from a version-2 draft", () => {
+    const draft = [...originalThree, libp2p(DYNAMIC_PLASMA_SPORK_ID), governance];
+    assert.deepEqual(mergeDefaultSporks(draft, 2), [...originalThree, libp2p(LIBP2P_SPORK_ID), governance]);
+  });
+
+  it("does not touch records that use neither placeholder ID", () => {
+    const custom: SporkRecord = { id: "ab".repeat(32), name: "my-spork", description: "", activated: false, enforcementHeight: 5 };
+    assert.deepEqual(mergeDefaultSporks([...originalThree, custom], 2), [...originalThree, custom]);
+  });
+
+  it("repairs an undefined-version draft that already carried the swapped pair", () => {
+    const merged = mergeDefaultSporks([...originalThree, dynamicPlasma(LIBP2P_SPORK_ID), libp2p(DYNAMIC_PLASMA_SPORK_ID)], undefined);
+    assert.deepEqual(merged, [...originalThree, dynamicPlasma(DYNAMIC_PLASMA_SPORK_ID), libp2p(LIBP2P_SPORK_ID), { ...governance }]);
+  });
+
+  it("appends the test sporks with correct IDs to a pre-spork undefined-version draft", () => {
+    const merged = mergeDefaultSporks(originalThree, undefined);
+    assert.deepEqual(ids(merged), ids([...DEFAULT_SPORKS]));
+    assert.deepEqual(duplicateSporkIds(merged), []);
+  });
+});
+
+describe("duplicateSporkIds", () => {
+  it("reports IDs that appear more than once, ignoring case", () => {
+    const sporks = [dynamicPlasma(LIBP2P_SPORK_ID), libp2p(LIBP2P_SPORK_ID.toUpperCase()), governance];
+    assert.deepEqual(duplicateSporkIds(sporks), [LIBP2P_SPORK_ID]);
+  });
+});
+
+describe("normalizeState spork migration", () => {
+  const finalizedGenesis = { genesis: { SporkConfig: { Sporks: [] } }, finalizedAt: "2026-09-18T10:05:44.643Z" } as unknown as NonNullable<AppState["finalizedGenesis"]>;
+  const stateWith = (sporks: SporkRecord[], defaultSporksVersion: number | undefined): Partial<AppState> =>
+    ({ defaultSporksVersion, finalizedGenesis, settings: { sporks } as unknown as AppState["settings"] }) as Partial<AppState>;
+
+  it("discards a finalized genesis when the migration changes the sporks", () => {
+    const state = normalizeState(stateWith([...originalThree, dynamicPlasma(LIBP2P_SPORK_ID), libp2p(DYNAMIC_PLASMA_SPORK_ID), governance], 2));
+    assert.equal(state.finalizedGenesis, undefined);
+    assert.equal(state.settings.sporks.find((spork) => spork.name === "dynamic-plasma")?.id, DYNAMIC_PLASMA_SPORK_ID);
+    assert.equal(state.defaultSporksVersion, DEFAULT_SPORKS_VERSION);
+  });
+
+  it("keeps a finalized genesis when the migration leaves the sporks unchanged", () => {
+    const state = normalizeState(stateWith([...originalThree, dynamicPlasma(DYNAMIC_PLASMA_SPORK_ID), libp2p(LIBP2P_SPORK_ID), governance], 2));
+    assert.deepEqual(state.finalizedGenesis, finalizedGenesis);
+  });
+
+  it("keeps a finalized genesis on a current-version state", () => {
+    const state = normalizeState(stateWith([...originalThree, dynamicPlasma(LIBP2P_SPORK_ID), libp2p(DYNAMIC_PLASMA_SPORK_ID), governance], DEFAULT_SPORKS_VERSION));
+    assert.deepEqual(state.finalizedGenesis, finalizedGenesis);
   });
 });

@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { DEFAULT_GENESIS_FUNDS, DEFAULT_SPORKS, DEFAULT_SPORKS_VERSION } from "./constants.js";
+import {
+  DEFAULT_GENESIS_FUNDS,
+  DEFAULT_SPORKS,
+  DEFAULT_SPORKS_VERSION,
+  DYNAMIC_PLASMA_SPORK_ID,
+  LIBP2P_SPORK_ID,
+  SPORK_IDS_CORRECTED_VERSION,
+  TEST_SPORKS_ADDED_VERSION
+} from "./constants.js";
 import { multiaddrFromEnode, multiaddrFromPublicKey } from "./libp2p.js";
 import type { AppState, NetworkSettings } from "../shared/types.js";
 
@@ -57,36 +65,39 @@ function defaultState(): AppState {
 
 // Drafts saved before defaults version 3 carried the dynamic-plasma and libp2p placeholder IDs
 // the wrong way round relative to go-zenon (issue #13). Nodes act on the ID, so the record labelled
-// dynamic-plasma actually activated libp2p. Swap the IDs back, keyed on the default names, and keep
-// everything else the admin configured for each record.
-const SWAPPED_SPORK_IDS_BEFORE_VERSION = 3;
-const SPORK_ID_REPAIRS: Record<string, { from: string; to: string }> = {
-  "dynamic-plasma": {
-    from: "0000000000000000000000000000000000000000000000000000000000000001",
-    to: "0000000000000000000000000000000000000000000000000000000000000002"
-  },
-  libp2p: {
-    from: "0000000000000000000000000000000000000000000000000000000000000002",
-    to: "0000000000000000000000000000000000000000000000000000000000000001"
-  }
-};
-
+// dynamic-plasma actually activated libp2p. Swap the two IDs on whichever records carry them, so a
+// record keeps meaning what the admin configured it to mean even if they renamed it. A draft where
+// either default already carries its correct ID was fixed by hand and is left alone.
 function repairSwappedSporkIds(sporks: NetworkSettings["sporks"]): NetworkSettings["sporks"] {
+  const isId = (spork: NetworkSettings["sporks"][number], id: string) => spork.id.toLowerCase() === id;
+  const alreadyCorrected = sporks.some(
+    (spork) => (spork.name === "dynamic-plasma" && isId(spork, DYNAMIC_PLASMA_SPORK_ID)) || (spork.name === "libp2p" && isId(spork, LIBP2P_SPORK_ID))
+  );
+  if (alreadyCorrected) return sporks;
   return sporks.map((spork) => {
-    const repair = SPORK_ID_REPAIRS[spork.name];
-    return repair && spork.id.toLowerCase() === repair.from ? { ...spork, id: repair.to } : spork;
+    if (isId(spork, LIBP2P_SPORK_ID)) return { ...spork, id: DYNAMIC_PLASMA_SPORK_ID };
+    if (isId(spork, DYNAMIC_PLASMA_SPORK_ID)) return { ...spork, id: LIBP2P_SPORK_ID };
+    return spork;
   });
 }
 
-export function mergeDefaultSporks(sporks: NetworkSettings["sporks"], currentVersion?: number): NetworkSettings["sporks"] {
-  if (currentVersion && currentVersion >= DEFAULT_SPORKS_VERSION) return sporks;
+function appendMissingDefaultSporks(sporks: NetworkSettings["sporks"]): NetworkSettings["sporks"] {
+  const existingIds = new Set(sporks.map((spork) => spork.id.toLowerCase()));
+  return [...sporks, ...DEFAULT_SPORKS.filter((spork) => !existingIds.has(spork.id.toLowerCase())).map((spork) => ({ ...spork }))];
+}
 
-  const repaired = (currentVersion ?? 0) < SWAPPED_SPORK_IDS_BEFORE_VERSION ? repairSwappedSporkIds(sporks) : sporks;
-  const existingIds = new Set(repaired.map((spork) => spork.id.toLowerCase()));
-  return [
-    ...repaired,
-    ...DEFAULT_SPORKS.filter((spork) => !existingIds.has(spork.id.toLowerCase())).map((spork) => ({ ...spork }))
-  ];
+/**
+ * Brings the sporks of a stored draft up to DEFAULT_SPORKS_VERSION. Defaults are only appended for
+ * drafts that predate them; a default an admin removed later stays removed.
+ */
+export function mergeDefaultSporks(sporks: NetworkSettings["sporks"], currentVersion?: number): NetworkSettings["sporks"] {
+  const version = currentVersion ?? 0;
+  if (version >= DEFAULT_SPORKS_VERSION) return sporks;
+
+  let result = sporks;
+  if (version < SPORK_IDS_CORRECTED_VERSION) result = repairSwappedSporkIds(result);
+  if (version < TEST_SPORKS_ADDED_VERSION) result = appendMissingDefaultSporks(result);
+  return result;
 }
 
 function uniqueStrings(values: Array<string | undefined>): string[] {
@@ -101,11 +112,15 @@ function safeMultiaddrFromPublicKey(publicIp: string, p2pPort: number, publicKey
   }
 }
 
-function normalizeState(state: Partial<AppState>): AppState {
+export function normalizeState(state: Partial<AppState>): AppState {
   const defaults = defaultState();
   const settingsDefaults = defaultSettings();
   const settings = state.settings ?? ({} as Partial<NetworkSettings>);
-  const sporks = settings.sporks?.length ? settings.sporks : settingsDefaults.sporks;
+  const storedSporks = settings.sporks?.length ? settings.sporks : settingsDefaults.sporks;
+  const sporks = mergeDefaultSporks(storedSporks, state.defaultSporksVersion);
+  // A finalized genesis bakes in the sporks. If the migration changed them it is stale and would
+  // otherwise be preferred over the corrected settings by preview, download and publish.
+  const finalizedGenesis = JSON.stringify(sporks) === JSON.stringify(storedSporks) ? state.finalizedGenesis : undefined;
   const seeders = settings.seeders ?? settingsDefaults.seeders;
   const seedNodes = (state.seedNodes ?? []).map((seedNode) => ({
     ...seedNode,
@@ -130,9 +145,10 @@ function normalizeState(state: Partial<AppState>): AppState {
       ...settings,
       seeders,
       bootstrapPeers: settings.bootstrapPeers ?? derivedBootstrapPeers,
-      sporks: mergeDefaultSporks(sporks, state.defaultSporksVersion),
+      sporks,
       genesisFunds: settings.genesisFunds ?? settingsDefaults.genesisFunds
     },
+    finalizedGenesis,
     defaultSporksVersion: DEFAULT_SPORKS_VERSION
   };
 }
