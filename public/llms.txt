@@ -1,39 +1,105 @@
 # Zenon Testnet
 
-> A public, community-run testnet for Zenon Network of Momentum (NoM). Free to use for wallets, SDKs, tooling, and protocol experiments. No registration or API key required.
+> A public, community-run testnet for Zenon Network of Momentum (NoM), chain identifier 73404. Free to use for wallets, SDKs, tooling, and protocol experiments. No registration or API key is required to read the chain or send transactions. Registered node operators sign in here to get their node package and bootstrap command; the site is the coordination point (the "testnet builder") for genesis, node config, releases, and node health.
 
-Connect any Zenon client (znn-cli, the Dart/TypeScript SDKs, or the Syrius wallet) to the RPC endpoints below, fund an address from the faucet, and start sending transactions.
+Everything on this page is public. Nothing here requires credentials except the operator and admin sections, which say so.
 
 ## RPC endpoints
 
-- WebSocket: wss://rpc.testnet.zenon.info (JSON-RPC 2.0 over WebSocket; supports subscriptions)
+- WebSocket: wss://rpc.testnet.zenon.info (JSON-RPC 2.0 over WebSocket; subscriptions via `ledger.subscribe`)
 - HTTPS: https://rpc.testnet.zenon.info (JSON-RPC 2.0 over HTTP POST)
 
-Both run on standard TLS ports — do not append a port number. The node exposes the standard go-zenon JSON-RPC namespaces: `ledger`, `stats`, `embedded`, and `subscribe` (WebSocket only). Example call:
+Both run on standard TLS ports; do not append a port number. Example call:
 
     curl -s https://rpc.testnet.zenon.info -X POST \
       -H 'Content-Type: application/json' \
-      -d '{"jsonrpc":"2.0","id":1,"method":"stats.networkInfo","params":[]}'
+      -d '{"jsonrpc":"2.0","id":1,"method":"ledger.getFrontierMomentum","params":[]}'
 
-## Test funds
+Intended namespaces are the standard go-zenon public set: `ledger`, `stats`, and every `embedded.*` contract API (`embedded.pillar`, `embedded.plasma`, `embedded.token`, `embedded.stake`, `embedded.sentinel`, `embedded.swap`, `embedded.spork`, `embedded.accelerator`, `embedded.htlc`, `embedded.bridge`, `embedded.liquidity`). As of 2026-09-24 the live nodes answer `ledger.*` and `stats.*` only; `embedded.*` calls return JSON-RPC error `-32601`. That is a node config defect, not a policy, and is tracked at https://github.com/0x3639/testnet/issues/15. Check `embedded.pillar.getAll` with params `[0, 1]` to see whether it has been fixed.
 
-- Faucet: https://faucet.zenonhub.io/ — request free testnet ZNN and QSR for any address you control. Testnet tokens have no monetary value.
+## Test funds and explorer
 
-## Explorer
+- Faucet: https://faucet.zenonhub.io/ requests free testnet ZNN and QSR for any address. Testnet tokens have no monetary value.
+- Explorer: https://explorer.testnet.zenon.info shows momentums, account blocks, and transactions.
 
-- https://explorer.testnet.zenon.info — block/momentum and transaction explorer.
+## Public machine-readable files on this site
 
-## Machine-readable APIs on this site
+All of these are unauthenticated GET requests.
 
-- [Network stats](https://testnet.zenon.info/api/public/stats): GET returns JSON with `chainIdentifier`, `genesisTimestampSec`, `goZenonRepo`, `goZenonRef`, `goZenonCommit`, `pillarCount`, `expectedPillars`, `seedNodeCount`, `activeNodes` (nodes reporting within the last 5 minutes), `totalNodes`, and `publishedAt`.
-- [Genesis file](https://testnet.zenon.info/genesis.json): the published genesis.json for this network (404 until published).
-- [Node config template](https://testnet.zenon.info/config.json): the published go-zenon config template (404 until published).
-- [Node plan](https://testnet.zenon.info/node-plan.json): the published release/deployment plan for node operators (404 until published).
+- [Network stats](https://testnet.zenon.info/api/public/stats): JSON with `chainIdentifier`, `genesisTimestampSec`, `goZenonRepo`, `goZenonRef`, `goZenonCommit` (the exact go-zenon commit nodes run), `pillarCount`, `expectedPillars`, `seedNodeCount`, `activeNodes` (nodes that reported within the last 5 minutes), `totalNodes`, and `publishedAt`. Not cached.
+- [Health](https://testnet.zenon.info/api/health): `{"ok":true}` when the site is up.
+- [Genesis file](https://testnet.zenon.info/genesis.json): the published go-zenon `genesis.json` for the current chain. `404` until an admin publishes.
+- [Node config template](https://testnet.zenon.info/config.json): the published non-producing go-zenon `config.json` (RPC on all interfaces, current seeders and bootstrap peers, no `Producer` block). Use it to run your own sync node. `404` until published.
+- [Node plan](https://testnet.zenon.info/node-plan.json): the published release. Fields: `schemaVersion`, `eventId`, `publishedAt`, `finalizedAt`, `genesisStartAt` (UTC), `actions.applyAt` (optional UTC time before which agents wait), `actions.wipeData` (whether agents wipe chain data before applying), `goZenon.{repoUrl,ref,commit}`, and `deployment.{repoUrl,ref,commit}`. Every published release is pinned to exact commits. `404` until published.
 
-## Node software
+Unknown paths on this site return the web app's HTML with status 200, so check the `Content-Type` header (`application/json`, `text/plain`) rather than the status code when probing for a file.
 
-- Source: https://github.com/zenon-network/go-zenon — the network runs a build of go-zenon; the exact repo, branch, and commit currently deployed are reported by the network stats API above.
+## Running your own node (no account needed)
 
-## For node operators
+Anyone can run a non-producing node from the public files. Build go-zenon at the commit reported by the network stats API (repo and ref are there too). `znnd` reads `config.json` from its data directory (`~/.znn` by default, or `--data <dir>`), so save `/config.json` as `~/.znn/config.json`. The published template sets `DataPath` to `/var/lib/znn` and `GenesisFile` to `/var/lib/znn/genesis.json`, so save `/genesis.json` there (or edit those two fields), then start `znnd`. Ports from the template: p2p `35995`, HTTP RPC `35997`, WebSocket RPC `35998`. Node source: https://github.com/zenon-network/go-zenon. Installer scripts used by the testnet: https://github.com/hypercore-one/deployment.
 
-Pillar and seed-node operators registered with this testnet sign in at https://testnet.zenon.info/ (Operator Login, upper right) to download node packages and report status. Operator accounts are provisioned by the testnet admin.
+## For registered node operators
+
+Operators run either a pillar (block producer) or a managed seed node (non-producing, with a builder-generated network key, enode, and libp2p multiaddr). Accounts are created by the testnet admin, who sends the login URL, username, and password. One node per account.
+
+### Web flow
+
+1. Sign in at https://testnet.zenon.info/ (Operator Login, upper right).
+2. Register: enter a pillar name, or tick "Register this account as a seed node" and enter node name, public IP, and p2p port (default 35995). Registration is one-shot per account.
+3. Download the node package (ZIP) with **Download Package** and store it offline; it is secret material.
+4. Copy the install command with **Copy Bootstrap** and run it as root on a fresh Linux/systemd host.
+5. The admin panel now shows your node's health from the installed agent; nothing else is required from you until the admin publishes a release, which the agent applies automatically.
+
+### The same flow over the API
+
+The API is what the web app uses. Sessions are HttpOnly cookies, so keep a cookie jar (`curl -c jar -b jar`).
+
+- `POST /api/auth/login` with JSON `{"username":"...","password":"..."}` returns `{"user":{...}}` and sets the session cookie. Limits: 10 attempts per account per address and 50 per address in 15 minutes, then `429` with `Retry-After`.
+- `GET /api/me` returns `{"user", "pillar"?, "seedNode"?, "bootstrap"?: {"statusToken"}}`. `pillar` carries `pillarName`, `pillarAddress`, `rewardAddress`, `producerAddress`, `producerIndex`; `seedNode` carries `nodeName`, `publicIp`, `p2pPort`, `publicKey`, `enode`, `multiaddr`.
+- `POST /api/pillar` registers the node: `{"nodeType":"pillar","pillarName":"<name>"}` or `{"nodeType":"seed","nodeName":"<name>","publicIp":"<ip>","p2pPort":35995}`. Returns `201`; `409` if the account already has a node or the name is taken.
+- `GET /api/pillar/package` downloads the ZIP for whichever node type the account registered.
+- `POST /api/auth/logout` ends the session.
+
+### What the package contains
+
+Pillar ZIP: `pillar-info.json`, a producer-specific `config.json`, encrypted keyfiles for the producer, pillar, and reward wallets, their passwords and seed words, `node/status-token.txt`, and `node/status-report-example.sh`.
+
+Seed-node ZIP: `seed-node-info.json`, `config.json`, `network-private-key`, and `node/status-token.txt`.
+
+The pillar `config.json` binds RPC to `127.0.0.1` (only the local agent needs it). Seed-node configs expose RPC on all interfaces so explorers and faucets can use them.
+
+### Bootstrap command
+
+The operator page shows this command with the values filled in:
+
+    curl -fsSL 'https://testnet.zenon.info/api/bootstrap/install.sh' | sudo env ZNN_BOOTSTRAP_TOKEN='<node-token>' ZNN_TESTNET_URL='https://testnet.zenon.info' bash
+
+`<node-token>` is the same value as `node/status-token.txt` in the package and as `bootstrap.statusToken` from `/api/me`. It authorizes node-specific downloads and status reports; treat it as a secret. Optional variables: `ZNN_DEPLOYMENT_MIN_CPU_CORES` (default 2; the upstream installer wants 4), `ZNN_BOOTSTRAP_TRACE=1` for verbose output. Host requirements: Debian/Ubuntu-style Linux with systemd, root, 2+ cores, 4 GiB RAM recommended (the RAM check only warns).
+
+What the installer does: installs `curl`, `git`, `jq`; writes `/usr/local/bin/znn-testnet-agent`; adds a one-minute cron entry; reports a `Waiting` status. Re-running it is safe and is how a node is moved to a new builder URL (it replaces the previous agent configuration; a node reports to exactly one builder). Once a release is published, the agent waits for `actions.applyAt` if set, then: fetches the manifest, clones the deployment repo at the pinned commit, builds go-zenon at the pinned commit with `zenon.sh --deploy zenon`, verifies the built `znnd` matches the pin, wipes chain data if `actions.wipeData` is true (keeping `/root/.znn/wallet`, `genesis.json`, `config.json`, `network-private-key`), writes `/root/.znn/genesis.json` and the node-specific `/root/.znn/config.json`, writes `/root/.znn/wallet/producer.json` plus `producer-password.txt` (pillars) or `/root/.znn/network-private-key` (seed nodes), restarts `go-zenon`, and reports.
+
+Useful paths on the node: service `go-zenon` (systemd), data `/root/.znn`, deployment checkout `/opt/zenon-deployment` (build errors in `/opt/zenon-deployment/.znnsh.log`), agent lock `/var/lock/znn-testnet-agent.lock`, local RPC `http://127.0.0.1:35997`.
+
+### Token-authenticated endpoints (header `Authorization: Bearer <node-token>`)
+
+These are what the agent calls; an operator or their tooling may call them too.
+
+- `GET /api/bootstrap/manifest`: the release for this node. Common fields: `schemaVersion`, `eventId`, `publishedAt`, `finalizedAt`, `genesisUrl`, `configUrl`, `nodePlanUrl`, `statusUrl`, `genesisStartAt`, `actions`, `goZenon`, `deployment`, `nodeType`, `nodeName`. Pillars add `pillarName`, `pillarAddress`, `rewardAddress`, `producerAddress`, `producerKeyFileUrl`, `producerPasswordUrl`. Seed nodes add `publicIp`, `p2pPort`, `publicKey`, `enode`, `multiaddr`, `networkPrivateKeyUrl`. `404` before the first publish; `409` if the published release violates the repository policy.
+- `GET /api/bootstrap/node-config.json`: the node-specific `config.json` for this token's node type.
+- `GET /api/bootstrap/pillar-config.json`, `GET /api/bootstrap/producer.json`, `GET /api/bootstrap/producer-password.txt`: pillars only (`404` for seed nodes).
+- `GET /api/bootstrap/network-private-key`: seed nodes only.
+- `POST /api/bootstrap/status` (alias `POST /api/node/status`): JSON health report. All fields optional: `eventId`, `reportedAt`, `node.{hostname,serviceActive,waitingForRelease,installedRepo,installedRef,installedCommit,genesisSha256,configSha256,lastError}`, `sync.{state,currentHeight,targetHeight}`, `network.{peerCount,selfPublicKey,selfIp,peers[≤100]{publicKey,ip,name,version}}`, `process.{version,commit}`, `logs.{errorCountLastMinute,warningCountLastMinute,recent[≤20]}`. The agent fills these from the local node's `stats.syncInfo`, `stats.networkInfo`, and `stats.processInfo`. A node counts as active on the public stats when it reported within 5 minutes.
+
+`GET /api/bootstrap/install.sh` needs no token; it is the installer script itself.
+
+## For the testnet admin
+
+Admin routes live under `/api/admin/*` and require an admin session. The admin console has six sections: Status, Launch Ops, Users, Nodes, Network, and Release. The launch order is: create operator logins, collect registrations, set the release target and genesis start time, add seeders, Finalize, then Publish Release. Details, environment variables, hosting on Coolify, and the release repository policy are in the README: https://github.com/0x3639/testnet/blob/main/README.md
+
+## Source and docs
+
+- Site source (this builder): https://github.com/0x3639/testnet
+- README: https://github.com/0x3639/testnet/blob/main/README.md
+- Cloudflare and origin lockdown notes: https://github.com/0x3639/testnet/blob/main/docs/cloudflare-origin-lockdown.md
+- Issues and questions: https://github.com/0x3639/testnet/issues
+- Node software: https://github.com/zenon-network/go-zenon
