@@ -221,6 +221,9 @@ export function buildNodeConfig(
       : undefined,
     // Pillars only need RPC for the local bootstrap agent, so their RPC listens on loopback with no
     // browser origins. Seed / non-producing nodes serve the explorer and faucet and stay public.
+    // go-zenon whitelists APIs by exact namespace ("embedded.pillar", "embedded.token", ...), so a
+    // bare "embedded" entry exposed nothing (issue #15). An empty list exposes every public namespace,
+    // which is what go-zenon's own shipped configs do.
     RPC: pillar
       ? {
           EnableHTTP: true,
@@ -231,7 +234,7 @@ export function buildNodeConfig(
           WSPort: 35998,
           HTTPCors: [],
           WSOrigins: [],
-          Endpoints: ["ledger", "stats", "embedded", "subscribe"]
+          Endpoints: []
         }
       : {
           EnableHTTP: true,
@@ -242,7 +245,7 @@ export function buildNodeConfig(
           WSPort: 35998,
           HTTPCors: ["*"],
           WSOrigins: ["*"],
-          Endpoints: ["ledger", "stats", "embedded", "subscribe"]
+          Endpoints: []
         },
     Net: {
       ListenHost: "0.0.0.0",

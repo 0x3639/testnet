@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { finalizeBlockers } from "./genesis.js";
+import { buildNodeConfig, finalizeBlockers } from "./genesis.js";
 import { defaultGenesisTimestampSec } from "./storage.js";
 import type { NetworkSettings, PillarRecord } from "../shared/types.js";
 
@@ -89,5 +89,15 @@ describe("defaultGenesisTimestampSec", () => {
     const value = defaultGenesisTimestampSec(now);
     assert.ok(value * 1000 - now >= 24 * 3600_000);
     assert.equal(new Date(value * 1000).toISOString(), "2026-09-14T19:00:00.000Z");
+  });
+});
+
+describe("buildNodeConfig RPC endpoints", () => {
+  // go-zenon registers an API only when RPC.Endpoints names its exact namespace, and the embedded
+  // APIs are namespaced "embedded.pillar", "embedded.token", ... so a bare "embedded" entry exposes
+  // nothing (issue #15). An empty list is go-zenon's documented "expose every public API" setting.
+  it("leaves the endpoint whitelist empty so every public namespace is exposed", () => {
+    assert.deepEqual(buildNodeConfig(settings).RPC.Endpoints, []);
+    assert.deepEqual(buildNodeConfig(settings, pillar("p1"), "pw").RPC.Endpoints, []);
   });
 });
