@@ -11,7 +11,7 @@ Pick one of the two hosting paths. Both end with an admin login at your URL; the
 **Coolify (hosted, TLS handled for you)**
 
 1. Generate a secret once and keep it: `openssl rand -hex 32`.
-2. In Coolify, add a **Docker Compose** resource from this Git repository (`https://github.com/0x3639/testnet.git`, branch `main`, compose file `docker-compose.coolify.yml`). See [Create The Resource](#create-the-resource).
+2. In Coolify, add a **Public Git Repository** resource for `https://github.com/0x3639/testnet.git` (branch `main`), set the build pack to **Docker Compose**, and set the compose file to `/docker-compose.coolify.yml`. See [Create The Resource](#create-the-resource).
 3. Point a DNS `A` record at the Coolify server, then set the `app` service's domain to `https://<your-host>:8787` (the `:8787` is required). See [Set Up The Domain](#set-up-the-domain).
 4. Set `APP_SECRET` to the secret from step 1 in the resource's environment variables; the other variables have working defaults. See [Environment Variables](#environment-variables).
 5. Deploy, then open the `app` container's terminal and create the admin login with `setpriv --reuid=node --regid=node --init-groups node dist/server/server/cli.js create-admin --username admin`. See [Create The First Admin](#create-the-first-admin).
@@ -46,6 +46,7 @@ Both paths preapprove the same release repositories (`zenon-network/go-zenon`, `
 - Release repository allowlist, immutable published releases pinned to exact commits, and node-side verification of the built `znnd` binary before it can start.
 - Admin user, pillar, and seed-node deletion.
 - A local four-node devnet generation script for validating the produced genesis/config artifacts.
+- A machine-readable site overview at `/llms.txt` (source `public/llms.txt`), linked from `robots.txt` and the page head, that gives agents and tooling the RPC endpoints, public files, and the full operator API and bootstrap flow.
 
 ## Planning Docs
 
@@ -181,9 +182,9 @@ Use `docker-compose.coolify.yml` to run the hosted testnet builder on Coolify. C
 In Coolify:
 
 1. Open the project and environment you want to deploy into.
-2. Click **New Resource** and choose **Docker Compose** from a **Git repository** (public repository, or a connected GitHub App for private ones).
+2. Click **New Resource** and choose the **Public Git Repository** card (or a connected GitHub App for a private fork). Do not pick the **Docker Compose** card: that one takes a pasted compose file with no repository behind it.
 3. Repository: `https://github.com/0x3639/testnet.git`, branch `main`.
-4. Docker Compose location: `docker-compose.coolify.yml`.
+4. Set **Build Pack** to **Docker Compose** and the compose file location to `/docker-compose.coolify.yml`, with the leading slash and no trailing whitespace; the field submits the raw text and rejects anything outside `^/[A-Za-z0-9._\-/~@+]+$` with "format is invalid".
 5. After Coolify loads the compose file, set the domain for the `app` service as described in [Set Up The Domain](#set-up-the-domain).
 6. Set the environment variables below.
 7. Click **Deploy**.
@@ -196,14 +197,14 @@ The app listens on port `8787` inside the container, and Coolify's proxy routes 
 
 1. Create a DNS `A` record (and `AAAA` if the server has IPv6) for the hostname, for example `testnet.zenon.info`, pointing at the Coolify server that runs this resource. Wait until it resolves.
 2. Make sure TCP ports `80` and `443` on that server reach Coolify's proxy; Let's Encrypt validation and the site itself use them.
-3. In the resource, open the `app` service and find the **Domains for app** field.
-4. Enter the domain with the `https://` scheme and the internal port suffix:
+3. In the resource, open the `app` service and its domain settings.
+4. The domain dialog has separate protocol, domain, and port fields. Enter `https`, the hostname, and the internal port `8787`; older Coolify versions show a single **Domains for app** field, where the same value is written as one string:
 
    ```text
    https://testnet.zenon.info:8787
    ```
 
-   The `:8787` tells Coolify which container port to route to; the public site is still served on the standard HTTPS port. Using `https://` makes Coolify's proxy request and renew the TLS certificate automatically.
+   The `8787` tells Coolify which container port to route to; the public site is still served on the standard HTTPS port. Using `https` makes Coolify's proxy request and renew the TLS certificate automatically.
 5. Save, then deploy (or redeploy) the resource so the proxy picks up the route.
 
 For a quick test without DNS, leave the field empty and click **Generate Domain**: Coolify assigns a temporary `sslip.io` hostname (or one under the server's **Wildcard Domain** if configured). Replace it with the real hostname before inviting operators, because the generated bootstrap commands embed the public URL.
@@ -275,7 +276,7 @@ The admin console has six sections: Status, Launch Ops, Users, Nodes, Network, a
 5. In **Network**, set the go-zenon and deployment repo/ref release target.
 6. In **Network**, set **Genesis Start (UTC)** to the intended chain start time. For a coordinated restart, set it comfortably in the future.
 7. In **Network**, optionally set **Apply Release At (UTC)** so nodes wait before stopping, wiping, downloading artifacts, and restarting.
-8. In **Users**, create an operator login for each managed seed node; then in **Nodes**, use **Seed Nodes** to select that login, enter node name, public IP, and p2p port. The app generates the network private key, public key, enode, and libp2p multiaddr immediately.
+8. In **Users**, create an operator login for each managed seed node; then in **Nodes**, use the **Seed nodes** panel to select that login, enter node name, public IP, and p2p port. The app generates the network private key, public key, enode, and libp2p multiaddr immediately.
 9. In **Network**, add or probe any external seed nodes, and confirm managed seed nodes are present in `Net.Seeders` and `Net.BootstrapPeers`.
 10. In **Release**, review the generated `genesis.json` and `config.json`.
 11. In **Release**, finalize the genesis when registrations are complete.
@@ -317,7 +318,7 @@ curl -fsSL "https://<domain>/api/bootstrap/install.sh" | sudo env ZNN_BOOTSTRAP_
 Run it on the node host. The script is intended for the same Linux/systemd style environment supported by `hypercore-one/deployment`.
 
 Re-running the command is safe and is how a node is moved to a new builder URL: the installer waits for any agent run in progress, removes the previous agent configuration (including any stray cron entries that would run the agent), installs the new one, and prints which URL it replaced. A node reports to exactly one builder, the one in the most recently run command. Node status tokens are stored in the builder's state, so after a migration that keeps `app-state.json` the same command and token keep working.
-In **Node Deployment**, the go-zenon repo and branch/tag choose the node source code that gets built. The deployment script repo and branch/tag choose the installer scripts that clone, build, install, and manage the service. Every published release is pinned to exact commits: leave a commit pin empty to pin the branch tip at publish time, or fill it in to publish a specific commit.
+In **Network**, the **Release target** panel's go-zenon repo and branch/tag choose the node source code that gets built. The deployment script repo and branch/tag choose the installer scripts that clone, build, install, and manage the service. Every published release is pinned to exact commits: leave a commit pin empty to pin the branch tip at publish time, or fill it in to publish a specific commit.
 For testnet operators, the bootstrap agent relaxes the deployment script CPU pre-flight minimum from 4 cores to 2 cores by default. Override it by adding `ZNN_DEPLOYMENT_MIN_CPU_CORES="<cores>"` to the bootstrap command if a stricter minimum is needed.
 The agent also changes the deployment script's total RAM check from a hard failure to a warning. A 4 GB VPS can report as `3GiB` after integer rounding, so the script will log the RAM finding and keep going. 4 GiB remains the recommended minimum for builds.
 The initial bootstrap run and the one-minute cron job share `/var/lock/znn-testnet-agent.lock`, so a long go-zenon build cannot be started twice. If `zenon.sh` reports `Failed to build binary`, check `/opt/zenon-deployment/.znnsh.log` for the underlying Go compiler error.
@@ -422,7 +423,7 @@ For a coordinated devnet restart, publish the release with `actions.applyAt` bef
 
 ## Seeders And Managed Seed Nodes
 
-For managed seed nodes, create an operator user, then use the admin **Seed Nodes** panel to select that login and enter the seed node name, public IP, and p2p port. The app generates the network private key, derives the legacy enode and libp2p multiaddr, saves them in draft `Net.Seeders` and `Net.BootstrapPeers`, and gives the assigned operator a seed-node bootstrap command when they log in. Managed seed nodes are non-producing nodes and are not included in `genesis.json` pillar allocations.
+For managed seed nodes, create an operator user, then use the **Seed nodes** panel in the admin **Nodes** section to select that login and enter the seed node name, public IP, and p2p port. The app generates the network private key, derives the legacy enode and libp2p multiaddr, saves them in draft `Net.Seeders` and `Net.BootstrapPeers`, and gives the assigned operator a seed-node bootstrap command when they log in. Managed seed nodes are non-producing nodes and are not included in `genesis.json` pillar allocations.
 
 This managed flow does not query the seed node RPC and does not require the seed node to be running before genesis/config are published. The enode and libp2p multiaddr are deterministic from the generated network private key plus public IP/port.
 
@@ -473,18 +474,22 @@ The generated `devnet/four-node/` directory contains wallet packages, node confi
 ## Repository Layout
 
 ```text
-src/server/                  Express API, auth, storage, genesis/config builders
-src/web/                     React admin/operator interface
+src/server/                  Express API, auth, storage, genesis/config builders, bootstrap installer
+src/web/                     React operator interface (App.tsx) and admin console (admin/)
 src/shared/                  Shared TypeScript types
+public/                      Static files served as-is: llms.txt, robots.txt, favicons, og.png
+docs/                        Planning docs, the Cloudflare lockdown procedure, and superpowers specs
 scripts/create-four-node-devnet.mjs
+scripts/og-card.html         Source for public/og.png
 docker/caddy/Caddyfile       Standalone Docker Caddy config
+docker/entrypoint.sh         Container entrypoint (fixes data volume ownership, drops to `node`)
 docker-compose.yml           Standalone app + Caddy stack (local / single host)
 docker-compose.coolify.yml   App-only stack for Coolify (TLS and routing by Coolify's proxy)
 ```
 
 ## API Endpoints
 
-Most API endpoints require an authenticated session cookie.
+Most API endpoints require an authenticated session cookie (set by `POST /api/auth/login`). The `/api/bootstrap/*` and `/api/node/status` routes use the node status token as a bearer token instead. `public/llms.txt` documents the request and response shapes of the public and operator routes for agents; `GET /llms.txt` serves it.
 
 Public endpoints:
 
@@ -493,34 +498,46 @@ Public endpoints:
 - `GET /genesis.json`
 - `GET /config.json`
 - `GET /node-plan.json`
+- `GET /llms.txt`, `GET /robots.txt`
+- `GET /api/bootstrap/install.sh`
 
-Admin-only downloads:
+Any other path returns the web app's `index.html` with status `200`.
 
-- `GET /api/admin/genesis.json`
-- `GET /api/admin/config-template.json`
-- `GET /api/admin/spork-package.zip`
+Session:
 
-Admin seed-node management:
+- `POST /api/auth/login` (rate limited, see [Runtime Environment Variables](#runtime-environment-variables))
+- `POST /api/auth/logout`
+- `GET /api/me`
 
-- `POST /api/admin/seed-nodes`
-- `DELETE /api/admin/seed-nodes/:seedNodeId`
-- `POST /api/admin/seeders/probe`
+Operator registration and download:
 
-Operator download:
-
+- `POST /api/pillar` (registers a pillar or a managed seed node for the signed-in operator)
 - `GET /api/pillar/package`
 
-Node heartbeat reporting:
+Node heartbeat reporting (bearer token):
 
 - `POST /api/bootstrap/status`
 - `POST /api/node/status`
 
-Operator bootstrap:
+Operator bootstrap (bearer token):
 
-- `GET /api/bootstrap/install.sh`
 - `GET /api/bootstrap/manifest`
 - `GET /api/bootstrap/node-config.json`
 - `GET /api/bootstrap/pillar-config.json`
 - `GET /api/bootstrap/producer.json`
 - `GET /api/bootstrap/producer-password.txt`
 - `GET /api/bootstrap/network-private-key`
+
+Admin (session with the `admin` role):
+
+- `GET /api/admin/overview`
+- `PUT /api/admin/settings`
+- `POST /api/admin/users`, `PUT /api/admin/users/:userId/password`, `DELETE /api/admin/users/:userId`
+- `DELETE /api/admin/pillars/:pillarId`
+- `POST /api/admin/seed-nodes`, `DELETE /api/admin/seed-nodes/:seedNodeId`
+- `POST /api/admin/seeders/probe`
+- `POST /api/admin/finalize`
+- `POST /api/admin/publish`
+- `GET /api/admin/genesis.json`
+- `GET /api/admin/config-template.json`
+- `GET /api/admin/spork-package.zip`
